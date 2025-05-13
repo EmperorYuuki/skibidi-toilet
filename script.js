@@ -28,6 +28,13 @@ const copySummaryBtn = document.getElementById('copy-summary-btn');
 const useSummaryBtn = document.getElementById('use-summary-btn');
 // const clearOutputBtn = document.getElementById('clear-output-btn'); // This is unused, replaced by clearOutputAreaBtn
 
+// Prompt Template Management DOM Elements
+const promptTemplateNameInput = document.getElementById('prompt-template-name');
+const savePromptAsBtn = document.getElementById('save-prompt-as-btn');
+const savedPromptsSelect = document.getElementById('saved-prompts-select');
+const loadPromptBtn = document.getElementById('load-prompt-btn');
+const deletePromptBtn = document.getElementById('delete-prompt-btn');
+
 // Word count display elements - to be initialized in DOMContentLoaded
 let inputWordCountEl = null;
 let outputWordCountEl = null;
@@ -65,7 +72,8 @@ const CONSTANTS = {
         SOURCE_LANGUAGE: 'sourceLanguage',
         TEMPERATURE: 'temperature',
         GROQ_API_KEY: 'groqApiKey',
-        DEEPSEEK_API_KEY: 'deepseekApiKey'
+        DEEPSEEK_API_KEY: 'deepseekApiKey',
+        SAVED_PROMPTS: 'fanficTranslatorSavedPrompts' // New key for saved prompts
         // DARK_MODE: 'darkMode' // Not actively used for setting, but was a key
     },
     API_KEY_PLACEHOLDERS: {
@@ -87,40 +95,40 @@ let groqApiKey = '';
 let deepseekApiKey = '';
 
 // --- Default Prompt Template ---
-const defaultPromptTemplate = `You are an expert fanfiction translator. Translate the following text from {source_language} to {target_language}.
+const defaultPromptTemplate = `You are an expert fanfiction translator. Your task is to completely and accurately translate the following work from {source_language} into {target_language}, ensuring that all chapters are translated in full and without interruption until the entire text is complete.
 
-**Fandom Context:**
-{fandom_context}
+Fandom Context:{fandom_context}
 
-**Previous Chapter Summary:**
-{previous_chapter_summary}
+Previous Chapter Summary (for continuity):{previous_chapter_summary}
 
-**Translator Notes/Instructions:**
-{notes}
+Translator Notes & Special Instructions:{notes}
 
-**Source Text:**
-"""
+Source Text:
+
 {source_text}
-"""
 
-**Translation Guidelines:**
-- Maintain the original tone, style, character voices, and nuances.
-- Adapt cultural references appropriately for an English-speaking audience while preserving the original meaning.
-- Ensure accuracy and fluency in the target language ({target_language}).
-- Pay attention to any specific instructions mentioned in the Translator Notes.
+Translation Guidelines:
 
-**Begin Translation:**`;
+Preserve the original tone, style, character voices, and narrative flow.
+
+Maintain all nuances and emotional subtext present in the original.
+
+Adapt cultural references thoughtfully for an English-speaking audience, while keeping the intent and meaning intact.
+
+Ensure the translation is fluent, idiomatic, and natural in {target_language}.
+
+Rigorously follow any additional guidance provided in the Translator Notes.
+
+Translate all chapters completely—do not stop until the full work is translated. No summarizing, skipping, or paraphrasing.
+
+Begin full translation below:`;
 
 // Model Pricing Data (Example - Update with actual Groq pricing if available)
 const modelPricing = {
     // Groq Prices (per million tokens, based on image)
-    'grok-3':                   { input: '$3.00', completion: '$15.00', context: '131k' },
     'grok-3-latest':            { input: '$3.00', completion: '$15.00', context: '131k' },
-    'grok-3-fast':              { input: '$5.00', completion: '$25.00', context: '131k' },
     'grok-3-fast-latest':       { input: '$5.00', completion: '$25.00', context: '131k' },
-    'grok-3-mini':              { input: '$0.30', completion: '$0.50', context: '131k' },
     'grok-3-mini-latest':       { input: '$0.30', completion: '$0.50', context: '131k' },
-    'grok-3-mini-fast':         { input: '$0.60', completion: '$4.00', context: '131k' },
     'grok-3-mini-fast-latest':  { input: '$0.60', completion: '$4.00', context: '131k' },
     // DeepSeek (Placeholder - update if you have real data)
     'deepseek-chat':            { input: '$0.27', completion: '$1.10', context: '64k' }, // Standard Price (Cache Miss)
@@ -198,6 +206,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 appendSummaryToTextarea(notesBox, summaryBox.value, CONSTANTS.LOCAL_STORAGE_KEYS.NOTES_CONTENT, 'Notes');
             });
         }
+
+        // Event listeners for Prompt Template Management
+        if (savePromptAsBtn) savePromptAsBtn.addEventListener('click', handleSavePromptAs);
+        if (loadPromptBtn) loadPromptBtn.addEventListener('click', handleLoadSelectedPrompt);
+        if (deletePromptBtn) deletePromptBtn.addEventListener('click', handleDeleteSelectedPrompt);
+
+        // Load saved prompt templates into dropdown
+        loadSavedPromptTemplatesToSelect();
 
         // Event listener for the new clear output area button
         if (clearOutputAreaBtn) {
@@ -374,25 +390,19 @@ function appendSummaryToTextarea(textareaElement, summaryText, storageKey, field
 
 // Update pricing display based on selected model
 function updatePricingDisplay() {
-    const selectedModelValue = modelSelect.value;
-    const pricing = modelPricing[selectedModelValue] || { input: 'N/A', completion: 'N/A', context: 'N/A' };
-    if (pricing) {
-        pricingDisplay.innerHTML =
-            `<strong>Input:</strong> ${pricing.input} / 1M tok | 
-            <strong>Output:</strong> ${pricing.completion} / 1M tok | 
-            <strong>Context:</strong> ${pricing.context}`; // Adjusted labels slightly
+    const selectedModel = modelSelect.value;
+    if (modelPricing[selectedModel]) {
+        const price = modelPricing[selectedModel];
+        pricingDisplay.innerHTML = `Input: ${price.input}/1M tokens, Completion: ${price.completion}/1M tokens, Context: ${price.context}`;
     } else {
-        pricingDisplay.textContent = 'Pricing details not available for this model.';
+        pricingDisplay.innerHTML = 'Pricing info not available.';
     }
 }
 
 // Handle Temperature Slider Change
 function handleTemperatureChange() {
-    const tempValue = temperatureSlider.value;
-    // Update the temperature display
-    if (temperatureValueDisplay) {
-        temperatureValueDisplay.textContent = tempValue;
-    }
+    const tempValue = parseFloat(temperatureSlider.value).toFixed(1);
+    temperatureValueDisplay.textContent = tempValue;
     saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.TEMPERATURE, tempValue);
 }
 
@@ -438,37 +448,6 @@ function updateTranslationState(isTranslating) {
     modelSelect.disabled = isTranslating;
     temperatureSlider.disabled = isTranslating;
     streamToggle.disabled = isTranslating;
-}
-
-// Helper function to construct the detailed fallback prompt
-function constructFallbackPrompt(sourceLanguage, targetLanguage, fandomContext, currentSummary, notes, textToTranslate) {
-    let finalPrompt = `You are an expert fanfiction translator performing translation from ${sourceLanguage} to ${targetLanguage}.`;
-    let userPromptSections = [
-        `Faithfully translate the following text from ${sourceLanguage} into ${targetLanguage}, ensuring the result reads naturally and authentically in the target language while preserving the spirit of the original.`
-    ];
-
-    if (fandomContext && fandomContext !== CONSTANTS.DEFAULT_VALUES.FANDOM_CONTEXT) {
-        userPromptSections.push(`--- Fandom Context ---\n${fandomContext}`);
-    }
-
-    if (currentSummary && currentSummary !== CONSTANTS.DEFAULT_VALUES.SUMMARY) {
-        userPromptSections.push(`--- Previous Chapter Summary ---\n${currentSummary}`);
-    }
-
-    if (notes && notes !== CONSTANTS.DEFAULT_VALUES.NOTES) {
-        userPromptSections.push(`--- Translator Notes & Special Instructions ---\n${notes}`);
-    }
-
-    userPromptSections.push(`--- Source Text (${sourceLanguage}) ---\n${textToTranslate}`);
-    userPromptSections.push(`--- Translation Guidelines ---
-- Preserve the original tone, narrative style, character voices, and subtle nuances.
-- Adapt cultural references thoughtfully to ensure clarity and resonance for an ${targetLanguage}-speaking audience, without distorting the original intent.
-- Ensure the translation is both accurate and fluent in ${targetLanguage}.
-- Carefully follow any specific instructions provided in the Translator Notes.
-- Begin the translation now.`);
-
-    finalPrompt += '\n\n' + userPromptSections.join('\n\n');
-    return finalPrompt;
 }
 
 // Main Translation Handler
@@ -794,25 +773,20 @@ async function getTranslation(prompt, model, temperature, stream = false, update
 
 // Helper function to handle API errors
 async function handleApiError(response, modelName = 'selected') { // Added modelName for context
-    let errorMsg = `Error from ${modelName} API: ${response.status} - ${response.statusText}`;
+    let errorData;
     try {
-        const errorData = await response.json();
-        const apiSpecificError = errorData.error?.message || errorData.message || (typeof errorData === 'string' ? errorData : JSON.stringify(errorData));
-        errorMsg += ` - Details: ${apiSpecificError}`;
+        errorData = await response.json();
     } catch (e) {
-        // Could not parse error response as JSON, or other error during parsing
-        errorMsg += ` - Could not parse error details from API response. Response text might be available in network tab.`;
-        console.error('Failed to parse API error JSON:', e);
-        // Optionally, try to get raw text if JSON parsing fails and it hasn't been read yet
-        try {
-            const rawText = await response.text(); // Be cautious if response body was already read
-            console.error('Raw API error response:', rawText);
-            errorMsg += ` Raw response snippet: ${rawText.substring(0, 100)}`;
-        } catch (textErr) {
-            console.error('Could not get raw text from error response:', textErr);
-        }
+        // If parsing JSON fails, use the raw text
+        const rawText = await response.text();
+        updateStatus(`API Error (${response.status}) with ${modelName} model: ${rawText || response.statusText}`, CONSTANTS.STATUS_TYPES.ERROR, 10000);
+        console.error('API Error (raw text):', rawText);
+        return;
     }
-    throw new Error(errorMsg); // Throw the constructed error message
+    
+    const errorMessage = errorData?.error?.message || errorData?.detail || response.statusText || 'Unknown API error';
+    updateStatus(`API Error (${response.status}) with ${modelName} model: ${errorMessage}`, CONSTANTS.STATUS_TYPES.ERROR, 10000);
+    console.error('API Error:', errorData);
 }
 
 // Clear specific field, its local storage, and optionally update its word count
@@ -1169,75 +1143,104 @@ function saveFandomContent() {
     }
 }
 
-// --- Final Setup ---
-
-// Add styling for status message types directly in JS
-document.head.insertAdjacentHTML('beforeend', `
-<style>
-    #status-message.error { color: #dc3545; font-weight: bold; }
-    #status-message.success { color: #198754; }
-    #status-message.processing { color: #0d6efd; }
-    #status-message.info { color: #6c757d; }
-    /* Add a subtle transition for status changes */
-    #status-message { transition: color 0.3s ease-in-out; }
-</style>
-`);
-
-// Helper function to safely get DOM elements with logging
-function safeGetElement(id) {
-    const element = document.getElementById(id);
-    if (!element) {
-        console.warn(`Element with ID '${id}' not found`);
-    }
-    return element;
+// --- Prompt Template Management Functions ---
+function getSavedPrompts() {
+    const promptsJson = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.SAVED_PROMPTS);
+    return promptsJson ? JSON.parse(promptsJson) : {};
 }
 
-// Initialize the UI and event handlers when the document is ready
-document.addEventListener('DOMContentLoaded', function() {
-    try {
-        // Initialize word count elements first so they are available globally if needed by other setup steps
-        inputWordCountEl = document.getElementById('input-word-count');
-        outputWordCountEl = document.getElementById('output-word-count');
+function savePromptsToStorage(prompts) {
+    localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.SAVED_PROMPTS, JSON.stringify(prompts));
+}
 
-        loadFromLocalStorage(); 
-        checkApiKey(); 
-        updatePricingDisplay(); 
+function loadSavedPromptTemplatesToSelect() {
+    if (!savedPromptsSelect) return;
+    const savedPrompts = getSavedPrompts();
+    savedPromptsSelect.innerHTML = '<option value="">-- Select a saved prompt --</option>'; // Clear existing options but keep placeholder
 
-        // ... (Button initializations) ...
-        const clearAllAppBtn = document.getElementById('clear-all-btn');
-        if (clearAllAppBtn) {
-            clearAllAppBtn.addEventListener('click', () => {
-                if (confirm('Are you sure you want to reset all settings and content?')) {
-                    // ... (clearing logic) ...
-                    updateStatus('All settings and content have been reset.', CONSTANTS.STATUS_TYPES.SUCCESS);
-                    // Refresh word counts using the globally available elements
-                    if (translationBox && inputWordCountEl) updateWordCount(translationBox, inputWordCountEl);
-                    if (outputBox && outputWordCountEl) updateWordCount(outputBox, outputWordCountEl);
-                }
-            });
+    for (const name in savedPrompts) {
+        if (savedPrompts.hasOwnProperty(name)) {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            savedPromptsSelect.appendChild(option);
         }
-
-        // Word Counters & Text Area Input Listeners
-        // const localInputWordCountEl = document.getElementById('input-word-count'); // No longer needed here
-        // const localOutputWordCountEl = document.getElementById('output-word-count'); // No longer needed here
-
-        if (translationBox && inputWordCountEl) {
-            updateWordCount(translationBox, inputWordCountEl);
-            translationBox.addEventListener('input', () => {
-                updateWordCount(translationBox, inputWordCountEl);
-            });
-        }
-        if (outputBox && outputWordCountEl) {
-            updateWordCount(outputBox, outputWordCountEl);
-            outputBox.addEventListener('input', () => updateWordCount(outputBox, outputWordCountEl));
-        }
-
-        // ... (rest of DOMContentLoaded) ...
-
-        updateStatus('Application initialized and ready.', CONSTANTS.STATUS_TYPES.INFO);
-
-    } catch (error) {
-        console.error('Error initializing application:', error);
-        updateStatus('Error initializing application. Check console for details.', CONSTANTS.STATUS_TYPES.ERROR);
     }
-});
+}
+
+function handleSavePromptAs() {
+    const name = promptTemplateNameInput.value.trim();
+    if (!name) {
+        updateStatus('Please enter a name for the prompt template.', CONSTANTS.STATUS_TYPES.WARNING);
+        promptTemplateNameInput.focus();
+        return;
+    }
+    if (!promptBox) return;
+    const templateContent = promptBox.value;
+    if (!templateContent.trim()) {
+        updateStatus('Prompt content cannot be empty.', CONSTANTS.STATUS_TYPES.WARNING);
+        promptBox.focus();
+        return;
+    }
+
+    const savedPrompts = getSavedPrompts();
+    if (savedPrompts[name]) {
+        if (!confirm(`A prompt named \'${name}\' already exists. Overwrite it?`)) {
+            return;
+        }
+    }
+
+    savedPrompts[name] = templateContent;
+    savePromptsToStorage(savedPrompts);
+    loadSavedPromptTemplatesToSelect(); // Refresh dropdown
+    promptTemplateNameInput.value = ''; // Clear name input
+    updateStatus(`Prompt template '${name}' saved.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+}
+
+function handleLoadSelectedPrompt() {
+    if (!savedPromptsSelect || !promptBox) return;
+    const selectedName = savedPromptsSelect.value;
+    if (!selectedName) {
+        updateStatus('Please select a prompt template to load.', CONSTANTS.STATUS_TYPES.INFO);
+        return;
+    }
+
+    const savedPrompts = getSavedPrompts();
+    if (savedPrompts[selectedName]) {
+        promptBox.value = savedPrompts[selectedName];
+        // Optionally, also save this loaded prompt as the current active prompt in localStorage
+        saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT, savedPrompts[selectedName]);
+        updateStatus(`Prompt template '${selectedName}' loaded.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+    } else {
+        updateStatus(`Error: Prompt template '${selectedName}' not found.`, CONSTANTS.STATUS_TYPES.ERROR);
+    }
+}
+
+function handleDeleteSelectedPrompt() {
+    if (!savedPromptsSelect) return;
+    const selectedName = savedPromptsSelect.value;
+    if (!selectedName) {
+        updateStatus('Please select a prompt template to delete.', CONSTANTS.STATUS_TYPES.INFO);
+        return;
+    }
+
+    if (!confirm(`Are you sure you want to delete the prompt template '${selectedName}\'?`)) {
+        return;
+    }
+
+    const savedPrompts = getSavedPrompts();
+    if (savedPrompts[selectedName]) {
+        delete savedPrompts[selectedName];
+        savePromptsToStorage(savedPrompts);
+        loadSavedPromptTemplatesToSelect(); // Refresh dropdown
+        if (promptBox.value === savedPrompts[selectedName]) { // If the deleted prompt was in the textarea
+            promptBox.value = defaultPromptTemplate; // Reset to default or clear
+            saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT, promptBox.value);
+        }
+        updateStatus(`Prompt template '${selectedName}' deleted.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+    } else {
+        updateStatus(`Error: Prompt template '${selectedName}' not found for deletion.`, CONSTANTS.STATUS_TYPES.ERROR);
+    }
+}
+
+// --- End of Prompt Template Management Functions ---

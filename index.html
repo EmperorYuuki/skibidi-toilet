@@ -26,20 +26,10 @@
                 <div class="input-group">
                     <label for="model-select">Translation Model:</label>
                     <select id="model-select">
-                        <optgroup label="grok-3-beta">
-                            <option value="grok-3">grok-3</option>
+                        <optgroup label="Groq">
                             <option value="grok-3-latest" selected>grok-3-latest</option>
-                        </optgroup>
-                        <optgroup label="grok-3-fast-beta">
-                            <option value="grok-3-fast">grok-3-fast</option>
                             <option value="grok-3-fast-latest">grok-3-fast-latest</option>
-                        </optgroup>
-                        <optgroup label="grok-3-mini-beta">
-                            <option value="grok-3-mini">grok-3-mini</option>
                             <option value="grok-3-mini-latest">grok-3-mini-latest</option>
-                        </optgroup>
-                        <optgroup label="grok-3-mini-fast-beta">
-                            <option value="grok-3-mini-fast">grok-3-mini-fast</option>
                             <option value="grok-3-mini-fast-latest">grok-3-mini-fast-latest</option>
                         </optgroup>
                         <optgroup label="DeepSeek">
@@ -70,7 +60,7 @@
                 </div>
                 <div class="input-group">
                     <label for="temperature-slider">Creativity: <span id="temperature-value">0.7</span></label>
-                    <input type="range" id="temperature-slider" min="0" max="1" step="0.1" value="0.7">
+                    <input type="range" id="temperature-slider" min="0" max="2" step="0.1" value="0.7">
                     <div class="temp-info">Lower = more accurate, Higher = more creative</div>
                 </div>
             </div>
@@ -106,11 +96,28 @@
                 
                 <div class="card">
                     <div class="card-header">
-                        <h2><i class="fas fa-scroll"></i> Prompt Template</h2>
+                        <h2><i class="fas fa-scroll"></i> Prompt Template Management</h2>
+                    </div>
+                    <div class="input-group">
+                        <label for="prompt-template-name">Prompt Name:</label>
+                        <input type="text" id="prompt-template-name" placeholder="Enter a name for this prompt">
+                    </div>
+                    <div class="textarea-controls prompt-management-controls">
+                        <button id="save-prompt-as-btn" class="action-btn"><i class="fas fa-save"></i> Save Current as New</button>
+                    </div>
+                    <div class="input-group">
+                        <label for="saved-prompts-select">Saved Prompts:</label>
+                        <select id="saved-prompts-select">
+                            <option value="">-- Select a saved prompt --</option>
+                        </select>
+                    </div>
+                    <div class="textarea-controls prompt-management-controls">
+                        <button id="load-prompt-btn" class="action-btn"><i class="fas fa-upload"></i> Load Selected</button>
+                        <button id="delete-prompt-btn" class="danger-btn"><i class="fas fa-trash-alt"></i> Delete Selected</button>
                     </div>
                     <textarea id="prompt-box" placeholder="Edit the translation prompt template here..."></textarea> 
                     <div class="textarea-controls">
-                        <button class="save-btn" data-target="prompt-box"><i class="fas fa-save"></i> Save Prompt</button>
+                        <button class="save-btn" data-target="prompt-box"><i class="fas fa-download"></i> Save Current to File</button>
                     </div>
                 </div>
 
