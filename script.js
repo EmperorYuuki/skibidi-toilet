@@ -39,6 +39,9 @@ const deletePromptBtn = document.getElementById('delete-prompt-btn');
 let inputWordCountEl = null;
 let outputWordCountEl = null;
 
+// Clear All button from the main app controls
+const clearAllAppBtn = document.getElementById('clear-all-btn'); 
+
 // --- Constants ---
 const CONSTANTS = {
     STATUS_TYPES: {
@@ -136,14 +139,18 @@ const modelPricing = {
 
 // --- Event Listeners ---
 document.addEventListener('DOMContentLoaded', () => {
+    console.info('DOM fully loaded and parsed. Initializing application...');
     try {
         // Load saved state first
+        console.log('[DOMReady] Attempting to load from local storage...');
         loadFromLocalStorage();
         
         // Check if keys are present
+        console.log('[DOMReady] Checking API keys...');
         checkApiKey();
         
         // Update pricing display
+        console.log('[DOMReady] Updating pricing display...');
         updatePricingDisplay();
 
         // Add event listeners for buttons with null checks
@@ -221,10 +228,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 clearSpecificField('output-box', CONSTANTS.LOCAL_STORAGE_KEYS.OUTPUT_CONTENT, 'output-word-count');
             });
         }
+
+        // Event listener for the main "Reset All" button
+        if (clearAllAppBtn) {
+            clearAllAppBtn.addEventListener('click', handleResetAllApplicationData);
+        }
     } catch (error) {
         console.error('Error initializing event listeners:', error);
         updateStatus('Error initializing application. Check console for details.', CONSTANTS.STATUS_TYPES.ERROR);
     }
+    console.info('Application initialization complete.');
 });
 
 // ... other event listeners ...
@@ -285,6 +298,7 @@ function checkApiKey() {
     if (modelSelect) {
         selectedModelValue = modelSelect.value;
     }
+    console.log(`[APIKeyCheck] Checking API keys. Selected model: ${selectedModelValue || 'None'}`);
 
     let keyForSelectedModelMissing = false;
     let missingKeyMessage = '';
@@ -311,6 +325,7 @@ function checkApiKey() {
             translateBtn.disabled = true;
             translateBtn.title = missingKeyMessage; // Add tooltip explaining why it's disabled
         }
+        console.warn(`[APIKeyCheck] Key missing for selected model '${selectedModelValue}'. Message: ${missingKeyMessage}`);
     } else {
         // If we passed the specific key check for the selected model, or no key check applies to it,
         // ensure the translate button is enabled (if not already translating).
@@ -325,6 +340,7 @@ function checkApiKey() {
         if (statusMessage && statusMessage.textContent.includes('API key is not set')) {
              updateStatus(CONSTANTS.UI.DEFAULT_STATUS_MESSAGE, CONSTANTS.STATUS_TYPES.INFO);
         }
+        console.log(`[APIKeyCheck] API key check passed for selected model '${selectedModelValue}' or no key required by current logic.`);
     }
 
     // General checks for any unset keys (these provide informational status updates)
@@ -404,6 +420,7 @@ function handleTemperatureChange() {
     const tempValue = parseFloat(temperatureSlider.value).toFixed(1);
     temperatureValueDisplay.textContent = tempValue;
     saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.TEMPERATURE, tempValue);
+    console.log(`[Settings] Temperature changed to: ${tempValue}`);
 }
 
 // Toggle Dark Mode
@@ -423,11 +440,13 @@ let abortController = null;
 // Stop translation function
 function stopTranslation() {
     if (abortController) {
+        console.log('[Translate] AbortController found, aborting translation...');
         abortController.abort();
         abortController = null;
     }
     updateTranslationState(false);
     updateStatus('Translation stopped.', CONSTANTS.STATUS_TYPES.INFO);
+    console.info('[Translate] Translation process stopped by user.');
 }
 
 // Update UI based on translation state
@@ -452,8 +471,10 @@ function updateTranslationState(isTranslating) {
 
 // Main Translation Handler
 async function handleTranslation() {
+    console.info('[Translate] Initiating translation process...');
     // If translation is already in progress, don't start another
     if (translationInProgress) {
+        console.warn('[Translate] Translation already in progress. New request ignored.');
         return;
     }
 
@@ -471,8 +492,10 @@ async function handleTranslation() {
 
     if (!textToTranslate) {
         updateStatus('Please enter text to translate.', CONSTANTS.STATUS_TYPES.WARNING);
+        console.warn('[Translate] No text to translate.');
         return;
     }
+    console.log(`[Translate] Model: ${selectedModel}, Source: ${sourceLanguage}, Target: ${targetLanguage}, Temp: ${temperature}, Streaming: ${enableStream}`);
 
     // Process prompt template variables
     let processedPrompt = userPromptTemplate
@@ -492,6 +515,7 @@ async function handleTranslation() {
     updateStatus('Translating...', CONSTANTS.STATUS_TYPES.PROCESSING);
     // Update UI state
     updateTranslationState(true);
+    console.log('[Translate] UI state updated for translation start.');
     // Clear previous output
     if (outputBox) {
         if (typeof outputBox.innerHTML !== 'undefined') {
@@ -508,6 +532,7 @@ async function handleTranslation() {
         // If streaming, we need to set up a callback to handle chunks of text
         let streamCallback = null;
         if (enableStream) {
+            console.log('[Translate] Streaming enabled. Setting up stream callback.');
             streamCallback = (text) => {
                 if (outputBox) {
                     // Format the text and append it to the output box
@@ -531,41 +556,46 @@ async function handleTranslation() {
         
         const translation = await getTranslation(processedPrompt, selectedModel, temperature, enableStream, streamCallback, abortController.signal);
         
-        if (!enableStream) { // If not streaming, update now with the complete translation
-            if (outputBox) {
-                const formattedTranslation = formatMarkdown(translation);
-                if (typeof outputBox.innerHTML !== 'undefined') {
-                    outputBox.innerHTML = formattedTranslation;
-                } else if (typeof outputBox.value !== 'undefined') {
-                    outputBox.value = translation;
+        if (!abortController) { // Check if translation was aborted
+            if (!enableStream) { // If not streaming, update now with the complete translation
+                console.log('[Translate] Non-streaming translation received. Updating output.');
+                if (outputBox) {
+                    const formattedTranslation = formatMarkdown(translation);
+                    if (typeof outputBox.innerHTML !== 'undefined') {
+                        outputBox.innerHTML = formattedTranslation;
+                    } else if (typeof outputBox.value !== 'undefined') {
+                        outputBox.value = translation;
+                    }
                 }
             }
-        }
-        
-        updateStatus('Translation complete!', CONSTANTS.STATUS_TYPES.SUCCESS);
-        
-        // Auto-save output to localStorage
-        if (outputBox) {
-            const outputContent = typeof outputBox.innerHTML !== 'undefined' ? outputBox.innerHTML : outputBox.value;
-            saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.OUTPUT_CONTENT, outputContent);
-        }
-        
-        // Enable summary button after successful translation
-        if (generateSummaryBtn) generateSummaryBtn.disabled = false;
-        
-        // Update word count
-        const outputCounter = document.getElementById('output-word-count');
-        if (outputCounter && outputBox) {
-            updateWordCount(outputBox, outputCounter);
+            updateStatus('Translation complete!', CONSTANTS.STATUS_TYPES.SUCCESS);
+            console.info('[Translate] Translation successful.');
+            
+            // Auto-save output to localStorage
+            if (outputBox) {
+                const outputContent = typeof outputBox.innerHTML !== 'undefined' ? outputBox.innerHTML : outputBox.value;
+                saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.OUTPUT_CONTENT, outputContent);
+            }
+            
+            // Enable summary button after successful translation
+            if (generateSummaryBtn) generateSummaryBtn.disabled = false;
+            
+            // Update word count
+            const outputCounter = document.getElementById('output-word-count');
+            if (outputCounter && outputBox) {
+                updateWordCount(outputBox, outputCounter);
+            }
         }
     } catch (error) {
         if (error.name === 'AbortError') {
             updateStatus('Translation stopped.', CONSTANTS.STATUS_TYPES.INFO);
+            // Already logged in stopTranslation
         } else {
-            console.error('Translation Error:', error);
+            console.error('[Translate] Translation Error:', error);
             updateStatus('Error: ' + error.message, CONSTANTS.STATUS_TYPES.ERROR);
         }
     } finally {
+        console.log('[Translate] Translation process finished (finally block).');
         // Reset UI state when done or on error
         updateTranslationState(false);
         abortController = null;
@@ -574,14 +604,17 @@ async function handleTranslation() {
 
 // Summarization Function
 async function handleSummaryGeneration() {
+    console.info('[Summary] Initiating summary generation...');
     const translatedText = outputBox.innerText; // Get plain text from the contenteditable div
     const model = modelSelect.value; // Use the same model for consistency, or choose another
     const temperature = 0.5; // Lower temperature for more focused summary
 
     if (!translatedText.trim()) {
         updateStatus('Nothing to summarize.', CONSTANTS.STATUS_TYPES.INFO);
+        console.warn('[Summary] No text to summarize.');
         return;
     }
+    console.log(`[Summary] Generating summary using model: ${model}, Temp: ${temperature}`);
 
     updateStatus('Generating summary...', CONSTANTS.STATUS_TYPES.PROCESSING);
     summaryBox.value = ''; // Clear previous summary
@@ -600,12 +633,14 @@ ${translatedText}`;
         const summary = await getTranslation(combinedPrompt, model, temperature, false);
         summaryBox.value = summary.trim();
         updateStatus('Summary generated.', CONSTANTS.STATUS_TYPES.SUCCESS);
+        console.info('[Summary] Summary generation successful.');
     } catch (error) {
-        console.error('Summary error:', error);
+        console.error('[Summary] Summary error:', error);
         summaryBox.value = `Error generating summary: ${error.message}`;
         updateStatus('Error generating summary: ' + error.message, CONSTANTS.STATUS_TYPES.ERROR);
     } finally {
         generateSummaryBtn.disabled = false; // Re-enable button
+        console.log('[Summary] Summary generation finished (finally block).');
     }
 }
 
@@ -654,12 +689,12 @@ async function processStream(response, updateCallback) {
     let buffer = '';
     let completeTranslation = '';
 
-    console.log('Starting to process streaming response');
+    console.log('[Stream] Starting to process streaming response');
 
     while (true) {
         const { value, done } = await reader.read();
         if (done) {
-            console.log('Stream completed');
+            console.log('[Stream] Stream completed');
             break;
         }
         
@@ -681,6 +716,7 @@ async function processStream(response, updateCallback) {
                             const choice = chunk.choices[0];
                             if (choice.delta && choice.delta.content) {
                                 textChunk = choice.delta.content;
+                                // console.log('[Stream] Received chunk:', textChunk); // Can be too spammy
                             } else if (choice.text) {
                                 textChunk = choice.text;
                             } else if (choice.message && choice.message.content) {
@@ -749,6 +785,7 @@ async function getTranslation(prompt, model, temperature, stream = false, update
             // but as a fallback if it were to return an error message instead:
             // throw new Error('API request failed after processing with handleApiError.'); 
         }
+        console.log(`[API] Request to ${apiUrl} for model ${model} returned status: ${response.status}`);
 
         if (stream && updateCallback) {
             return await processStream(response, updateCallback);
@@ -800,6 +837,7 @@ function clearSpecificField(elementId, storageKey, wordCountElementId = null) {
         }
         if (storageKey) {
             localStorage.removeItem(storageKey);
+            console.log(`[ClearField] Cleared ${elementId} and removed ${storageKey} from localStorage.`);
         }
         updateStatus(`${elementId.replace('-box','').replace('-',' ')} cleared.`, CONSTANTS.STATUS_TYPES.INFO);
 
@@ -817,6 +855,7 @@ function clearSpecificField(elementId, storageKey, wordCountElementId = null) {
 
 // Clear Prompt, Fandom, Notes fields
 function clearAllFields() {
+    console.info('[ClearAll] Clearing prompt, fandom, and notes fields.');
     promptBox.value = '';
     fandomBox.value = '';
     notesBox.value = '';
@@ -829,8 +868,37 @@ function clearAllFields() {
     // For now, keep model, temp, source lang, theme
     promptBox.value = defaultPromptTemplate; // Reset prompt to default
     saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT, defaultPromptTemplate);
+    console.log('[ClearAllFields] Prompt, Fandom, Notes fields cleared and prompt reset to default.');
 
     updateStatus('Prompt, Fandom, and Notes fields cleared.', CONSTANTS.STATUS_TYPES.INFO);
+}
+
+function handleResetAllApplicationData() {
+    console.warn('[ResetAllApp] User initiated full application data reset.');
+    if (confirm('Are you sure you want to reset ALL application data? This includes text, settings, and API keys.')) {
+        console.log('[ResetAllApp] User confirmed full reset.');
+        // Clear all known local storage items for this app
+        for (const key in CONSTANTS.LOCAL_STORAGE_KEYS) {
+            if (CONSTANTS.LOCAL_STORAGE_KEYS.hasOwnProperty(key)) {
+                localStorage.removeItem(CONSTANTS.LOCAL_STORAGE_KEYS[key]);
+                console.log(`[ResetAllApp] Removed ${CONSTANTS.LOCAL_STORAGE_KEYS[key]} from localStorage.`);
+            }
+        }
+
+        // Also clear API keys from memory
+        groqApiKey = '';
+        deepseekApiKey = '';
+
+        // Reload the page to apply defaults and clear state thoroughly
+        updateStatus('Application data reset. Reloading page...', CONSTANTS.STATUS_TYPES.SUCCESS, 2000);
+        console.log('[ResetAllApp] Reloading page to apply reset.');
+        setTimeout(() => {
+            window.location.reload();
+        }, 2000); // Give user time to see the status message
+    } else {
+        console.info('[ResetAllApp] Full application data reset cancelled by user.');
+        updateStatus('Application reset cancelled.', CONSTANTS.STATUS_TYPES.INFO);
+    }
 }
 
 // Save content of a specific textarea or rich text editor to a .txt file
@@ -867,9 +935,10 @@ async function saveAllAsZip() {
     // Check if JSZip is loaded
     if (typeof JSZip === 'undefined') {
         updateStatus('Error: JSZip library not loaded. Cannot save as ZIP.', CONSTANTS.STATUS_TYPES.ERROR);
-        console.error('JSZip is not defined. Make sure the library is included in index.html.');
+        console.error('[ZIP] JSZip is not defined. Make sure the library is included in index.html.');
         return;
     }
+    console.info('[ZIP] Initiating save all as ZIP...');
 
     try {
         const zip = new JSZip();
@@ -896,13 +965,14 @@ async function saveAllAsZip() {
                 link.click();
                 document.body.removeChild(link);
                 updateStatus('All files and settings saved as ZIP.', CONSTANTS.STATUS_TYPES.SUCCESS);
+                console.info('[ZIP] Successfully generated and downloaded ZIP file.');
             })
             .catch(err => {
-                console.error("Error generating ZIP blob:", err);
+                console.error("[ZIP] Error generating ZIP blob:", err);
                 updateStatus('Error generating ZIP file.', CONSTANTS.STATUS_TYPES.ERROR);
             });
     } catch (err) {
-        console.error("Error creating ZIP object:", err);
+        console.error("[ZIP] Error creating ZIP object:", err);
         updateStatus('Error preparing ZIP file.', CONSTANTS.STATUS_TYPES.ERROR);
     }
 }
@@ -922,19 +992,29 @@ function saveToLocalStorage(key, value) {
     const valueToStore = typeof value === 'boolean' ? String(value) : value;
     try {
         localStorage.setItem(key, valueToStore);
+        // Avoid logging the actual value for potentially large content like promptContent or translationContent
+        if (key === CONSTANTS.LOCAL_STORAGE_KEYS.GROQ_API_KEY || key === CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY) {
+            console.log(`[LocalStorage] Saved ${key}: (API key - value not logged)`);
+        } else if (valueToStore && valueToStore.length > 100) { // Heuristic for large content
+            console.log(`[LocalStorage] Saved ${key}: (large content - value not logged, length: ${valueToStore.length})`);
+        } else {
+            console.log(`[LocalStorage] Saved ${key}: ${valueToStore}`);
+        }
     } catch (e) {
-        console.error(`Error saving ${key} to localStorage:`, e);
+        console.error(`[LocalStorage] Error saving ${key} to localStorage:`, e);
         updateStatus('Warning: Could not save data to local storage. It might be full.', CONSTANTS.STATUS_TYPES.WARNING);
     }
 }
 
 function loadFromLocalStorage() {
+    console.info('[LocalStorage] Starting to load data from local storage.');
     document.body.classList.add('dark-mode');
 
     let loadedGroqKey = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.GROQ_API_KEY) || ''; 
     let loadedDeepSeekKey = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY) || '';
     groqApiKey = loadedGroqKey;
     deepseekApiKey = loadedDeepSeekKey;
+    console.log('[LocalStorage] API Keys loaded (values not displayed).');
 
     // Modal Elements
     const apiSettingsModal = document.getElementById('api-settings-modal');
@@ -980,6 +1060,7 @@ function loadFromLocalStorage() {
             
             if (apiSettingsModal) apiSettingsModal.style.display = 'none';
             updateStatus('API keys saved successfully', CONSTANTS.STATUS_TYPES.SUCCESS);
+            console.log('[APIKeys] API keys saved via modal.');
             checkApiKey(); 
         });
     }
@@ -1014,8 +1095,9 @@ function loadFromLocalStorage() {
     if (temperatureSlider) {
         temperatureSlider.value = savedTemperature || CONSTANTS.DEFAULT_VALUES.TEMPERATURE;
     }
-    handleTemperatureChange();
+    handleTemperatureChange(); // This will also log the temperature change
     updatePricingDisplay();
+    console.info('[LocalStorage] Finished loading data from local storage.');
     updateStatus('Loaded previous session from local storage.', CONSTANTS.STATUS_TYPES.INFO, CONSTANTS.TIMEOUTS.STATUS_LOADED_SESSION);
 }
 
@@ -1173,6 +1255,7 @@ function handleSavePromptAs() {
     if (!name) {
         updateStatus('Please enter a name for the prompt template.', CONSTANTS.STATUS_TYPES.WARNING);
         promptTemplateNameInput.focus();
+        console.warn('[PromptTemplate] Save failed: No name provided.');
         return;
     }
     if (!promptBox) return;
@@ -1180,14 +1263,17 @@ function handleSavePromptAs() {
     if (!templateContent.trim()) {
         updateStatus('Prompt content cannot be empty.', CONSTANTS.STATUS_TYPES.WARNING);
         promptBox.focus();
+        console.warn('[PromptTemplate] Save failed: Prompt content empty.');
         return;
     }
 
     const savedPrompts = getSavedPrompts();
     if (savedPrompts[name]) {
-        if (!confirm(`A prompt named \'${name}\' already exists. Overwrite it?`)) {
+        if (!confirm(`A prompt named '${name}' already exists. Overwrite it?`)) {
+            console.log('[PromptTemplate] Overwrite of prompt declined by user.');
             return;
         }
+        console.log(`[PromptTemplate] User confirmed overwrite for prompt: '${name}'.`);
     }
 
     savedPrompts[name] = templateContent;
@@ -1195,6 +1281,7 @@ function handleSavePromptAs() {
     loadSavedPromptTemplatesToSelect(); // Refresh dropdown
     promptTemplateNameInput.value = ''; // Clear name input
     updateStatus(`Prompt template '${name}' saved.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+    console.info(`[PromptTemplate] Prompt template '${name}' saved successfully.`);
 }
 
 function handleLoadSelectedPrompt() {
@@ -1202,6 +1289,7 @@ function handleLoadSelectedPrompt() {
     const selectedName = savedPromptsSelect.value;
     if (!selectedName) {
         updateStatus('Please select a prompt template to load.', CONSTANTS.STATUS_TYPES.INFO);
+        console.log('[PromptTemplate] Load failed: No prompt selected from dropdown.');
         return;
     }
 
@@ -1211,8 +1299,10 @@ function handleLoadSelectedPrompt() {
         // Optionally, also save this loaded prompt as the current active prompt in localStorage
         saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT, savedPrompts[selectedName]);
         updateStatus(`Prompt template '${selectedName}' loaded.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+        console.info(`[PromptTemplate] Prompt template '${selectedName}' loaded successfully.`);
     } else {
         updateStatus(`Error: Prompt template '${selectedName}' not found.`, CONSTANTS.STATUS_TYPES.ERROR);
+        console.error(`[PromptTemplate] Error loading prompt: Template '${selectedName}' not found in storage.`);
     }
 }
 
@@ -1221,25 +1311,32 @@ function handleDeleteSelectedPrompt() {
     const selectedName = savedPromptsSelect.value;
     if (!selectedName) {
         updateStatus('Please select a prompt template to delete.', CONSTANTS.STATUS_TYPES.INFO);
+        console.log('[PromptTemplate] Delete failed: No prompt selected from dropdown.');
         return;
     }
 
     if (!confirm(`Are you sure you want to delete the prompt template '${selectedName}\'?`)) {
+        console.log('[PromptTemplate] Deletion of prompt declined by user.');
         return;
     }
+    console.log(`[PromptTemplate] User confirmed deletion for prompt: '${selectedName}'.`);
 
     const savedPrompts = getSavedPrompts();
     if (savedPrompts[selectedName]) {
+        const deletedPromptContent = savedPrompts[selectedName]; // Store before deleting for comparison
         delete savedPrompts[selectedName];
         savePromptsToStorage(savedPrompts);
         loadSavedPromptTemplatesToSelect(); // Refresh dropdown
-        if (promptBox.value === savedPrompts[selectedName]) { // If the deleted prompt was in the textarea
+        if (promptBox.value === deletedPromptContent) { // If the deleted prompt was in the textarea
+            console.log('[PromptTemplate] Deleted prompt was active in textarea, resetting to default.');
             promptBox.value = defaultPromptTemplate; // Reset to default or clear
             saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT, promptBox.value);
         }
         updateStatus(`Prompt template '${selectedName}' deleted.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+        console.info(`[PromptTemplate] Prompt template '${selectedName}' deleted successfully.`);
     } else {
         updateStatus(`Error: Prompt template '${selectedName}' not found for deletion.`, CONSTANTS.STATUS_TYPES.ERROR);
+        console.error(`[PromptTemplate] Error deleting prompt: Template '${selectedName}' not found in storage.`);
     }
 }
 
