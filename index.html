@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fanfic Translator</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header class="app-header">
+            <h1><i class="fas fa-language"></i> Fanfic Translator</h1>
+            <div class="header-controls">
+                <button id="api-settings-btn" class="action-btn" title="API Settings"><i class="fas fa-key"></i> API Keys</button>
+            </div>
+        </header>
+        <div class="settings-grid">
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-brain"></i> Model</h2>
+                </div>
+                <div class="input-group">
+                    <label for="model-select">Translation Model:</label>
+                    <select id="model-select">
+                        <optgroup label="grok-3-beta">
+                            <option value="grok-3">grok-3</option>
+                            <option value="grok-3-latest" selected>grok-3-latest</option>
+                        </optgroup>
+                        <optgroup label="grok-3-fast-beta">
+                            <option value="grok-3-fast">grok-3-fast</option>
+                            <option value="grok-3-fast-latest">grok-3-fast-latest</option>
+                        </optgroup>
+                        <optgroup label="grok-3-mini-beta">
+                            <option value="grok-3-mini">grok-3-mini</option>
+                            <option value="grok-3-mini-latest">grok-3-mini-latest</option>
+                        </optgroup>
+                        <optgroup label="grok-3-mini-fast-beta">
+                            <option value="grok-3-mini-fast">grok-3-mini-fast</option>
+                            <option value="grok-3-mini-fast-latest">grok-3-mini-fast-latest</option>
+                        </optgroup>
+                        <optgroup label="DeepSeek">
+                            <option value="deepseek-chat">DeepSeek</option>
+                        </optgroup>
+                    </select>
+                    <div id="pricing-display" class="pricing-info"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-globe"></i> Languages</h2>
+                </div>
+                <div class="input-group">
+                    <label for="source-language">Source Language:</label>
+                    <input type="text" id="source-language" placeholder="e.g., Chinese" value="Chinese">
+                </div>
+                <div class="input-group">
+                    <label for="target-language">Target Language:</label>
+                    <div id="target-language" class="text-display">English</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-thermometer-half"></i> Temperature</h2>
+                </div>
+                <div class="input-group">
+                    <label for="temperature-slider">Creativity: <span id="temperature-value">0.7</span></label>
+                    <input type="range" id="temperature-slider" min="0" max="1" step="0.1" value="0.7">
+                    <div class="temp-info">Lower = more accurate, Higher = more creative</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-cogs"></i> Options</h2>
+                </div>
+                <div class="input-group checkbox-group">
+                    <input type="checkbox" id="stream-toggle" name="stream-toggle">
+                    <label for="stream-toggle">Enable Streaming Response</label>
+                    <span class="tooltip">(Shows results as they arrive)</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="left-panel">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-file-alt"></i> Source Text</h2>
+                        <div class="word-counter" id="input-word-count">
+                            0 words | 0 chars
+                        </div>
+                    </div>
+                    <textarea id="translation-box" placeholder="Enter text to translate here..."></textarea>
+                    <div class="textarea-controls">
+                        <button id="clear-input-btn" class="clear-btn"><i class="fas fa-trash-alt"></i> Clear</button>
+                        <button id="translate-btn" class="primary-action-btn"><i class="fas fa-language"></i> Translate</button>
+                        <button id="stop-btn" class="danger-btn" style="display:none;"><i class="fas fa-stop-circle"></i> Stop</button>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-scroll"></i> Prompt Template</h2>
+                    </div>
+                    <textarea id="prompt-box" placeholder="Edit the translation prompt template here..."></textarea> 
+                    <div class="textarea-controls">
+                        <button class="save-btn" data-target="prompt-box"><i class="fas fa-save"></i> Save Prompt</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-sticky-note"></i> Notes & Instructions</h2>
+                    </div>
+                    <textarea id="notes-box" placeholder="Enter specific instructions, voice notes, or terminology here..."></textarea>
+                    <div class="textarea-controls">
+                        <button id="clear-notes-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
+                        <button id="save-notes-btn" class="save-btn"><i class="fas fa-save"></i> Save</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="right-panel">
+                <div class="card output-area">
+                    <div class="card-header">
+                        <h2><i class="fas fa-language"></i> Translated Text</h2>
+                        <div class="word-counter" id="output-word-count">
+                            0 words | 0 chars
+                        </div>
+                    </div>
+                    <div id="output-box" class="output-box" contenteditable="true" placeholder="Translation will appear here..."></div>
+                    <div class="textarea-controls">
+                        <button id="copy-output-btn" class="action-btn"><i class="fas fa-copy"></i> Copy</button>
+                        <button id="save-output-btn" class="save-btn" data-target="output-box"><i class="fas fa-save"></i> Save</button>
+                        <button id="generate-summary-btn" class="primary-action-btn"><i class="fas fa-list-alt"></i> Generate Summary</button>
+                        <button id="clear-output-area-btn" class="action-btn clear-btn"><i class="fas fa-trash-alt"></i> Clear Output</button>
+                    </div>
+                </div>
+                
+                <div class="card summary-area" style="display: none;">
+                    <div class="card-header">
+                        <h2><i class="fas fa-clipboard-list"></i> Translation Summary</h2>
+                    </div>
+                    <textarea id="summary-box" placeholder="Generated summary will appear here..."></textarea>
+                    <div class="textarea-controls">
+                        <button id="copy-summary-btn" class="action-btn"><i class="fas fa-copy"></i> Copy</button>
+                        <button id="use-summary-btn" class="primary-action-btn"><i class="fas fa-arrow-right"></i> Add to Notes</button>
+                        <button id="add-to-prompt-btn" class="action-btn"><i class="fas fa-plus-circle"></i> Add to Prompt</button>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-users"></i> Fandom Context</h2>
+                    </div>
+                    <textarea id="fandom-box" placeholder="Enter fandom-specific context or terminology here..."></textarea>
+                    <div class="textarea-controls">
+                        <button id="clear-fandom-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
+                        <button class="save-btn" data-target="fandom-box"><i class="fas fa-save"></i> Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status-area">
+            <div class="card status-bar">
+                <p id="status-message">Ready to translate</p>
+            </div>
+            
+            <div class="card controls-card">
+                <div class="app-controls">
+                    <button id="save-all-btn" class="action-btn"><i class="fas fa-download"></i> Export All Settings</button>
+                    <button id="clear-all-btn" class="clear-btn"><i class="fas fa-eraser"></i> Reset All</button>
+                    <button id="api-keys-btn" class="action-btn"><i class="fas fa-key"></i> Configure API Keys</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- API Settings Modal -->
+        <div id="api-settings-modal" class="modal" style="display: none;">
+            <div class="modal-content card">
+                <div class="card-header">
+                    <h2><i class="fas fa-key"></i> API Settings</h2>
+                    <button id="close-api-modal" class="close-btn"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="input-group">
+                    <label for="groq-api-key">Groq API Key:</label>
+                    <input type="password" id="groq-api-key" placeholder="Enter your Groq API key">
+                </div>
+                <div class="input-group">
+                    <label for="deepseek-api-key">DeepSeek API Key:</label>
+                    <input type="password" id="deepseek-api-key" placeholder="Enter your DeepSeek API key">
+                </div>
+                <div class="modal-actions">
+                    <button id="save-api-keys" class="primary-action-btn"><i class="fas fa-save"></i> Save API Keys</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
