@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text Chunker</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+        }
+        h1 {
+            color: #89b4fa;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .controls {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            flex: 1;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #89b4fa;
+        }
+        select, input, button {
+            width: 100%;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #45475a;
+            background-color: #313244;
+            color: #cdd6f4;
+            margin-bottom: 10px;
+        }
+        button {
+            background-color: #89b4fa;
+            color: #1e1e2e;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #74c7ec;
+        }
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #45475a;
+            background-color: #313244;
+            color: #cdd6f4;
+            resize: vertical;
+        }
+        .results {
+            margin-top: 20px;
+        }
+        .chunk {
+            background-color: #313244;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border-left: 4px solid #f5c2e7;
+        }
+        .chunk-header {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 1px solid #45475a;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+            color: #f5c2e7;
+            font-weight: bold;
+        }
+        .tokenizer-status {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+        .connected {
+            background-color: #a6e3a1;
+            color: #1e1e2e;
+        }
+        .disconnected {
+            background-color: #f38ba8;
+            color: #1e1e2e;
+        }
+        .stats {
+            background-color: #313244;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .stat-item {
+            margin-bottom: 5px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Text Chunker Visualization</h1>
+    
+    <div class="container">
+        <div id="tokenizer-status" class="tokenizer-status disconnected">
+            DeepSeek Tokenizer Server: Checking connection...
+        </div>
+        
+        <div class="controls">
+            <div class="form-group">
+                <label for="model-select">Select Model Type:</label>
+                <select id="model-select">
+                    <option value="grok">Grok (22,000 tokens/chunk)</option>
+                    <option value="deepseek">DeepSeek (6,000 tokens/chunk)</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="custom-limit">Custom Chunk Size (optional):</label>
+                <input type="number" id="custom-limit" placeholder="Leave empty for default size">
+            </div>
+            
+            <div class="form-group">
+                <label>&nbsp;</label>
+                <button id="chunk-btn">Chunk Text</button>
+            </div>
+        </div>
+        
+        <textarea id="source-text" placeholder="Enter or paste text to chunk..."></textarea>
+        
+        <div id="loading" class="loading">
+            Processing text... Please wait.
+        </div>
+        
+        <div id="results" class="results"></div>
+        
+        <div id="stats" class="stats" style="display: none;">
+            <h3>Chunking Statistics</h3>
+            <div class="stat-item">Total Text: <span id="stat-total-length">0</span> characters / <span id="stat-total-words">0</span> words</div>
+            <div class="stat-item">Number of Chunks: <span id="stat-chunk-count">0</span></div>
+            <div class="stat-item">Average Chunk Size: <span id="stat-avg-chunk-size">0</span> characters / <span id="stat-avg-chunk-words">0</span> words</div>
+            <div class="stat-item" id="stat-tokens-container" style="display: none;">Average Tokens per Chunk: <span id="stat-avg-tokens">0</span></div>
+        </div>
+    </div>
+
+    <script src="chunker.js"></script>
+</body>
+</html> 

@@ -6,6 +6,7 @@ A web-based tool for translating text, especially fanfiction, using AI language 
 
 *   **Multiple AI Models**: Supports translation using various models from Groq (Grok-3 series) and DeepSeek.
 *   **Customizable Prompts**: Users can define and save their own prompt templates for translation.
+*   **Chunking System**: Automatically splits large text into smaller chunks for translation, ensuring high quality outputs even for massive texts.
 *   **Contextual Translation**:
     *   **Fandom Context**: Add fandom-specific terminology and nuances.
     *   **Notes & Instructions**: Provide specific instructions or stylistic notes for the translator.
@@ -89,6 +90,23 @@ A web-based tool for translating text, especially fanfiction, using AI language 
     npx serve
     ```
     Then navigate to the local server address (e.g., `http://localhost:8000`).
+
+4.  **Optional but Recommended: Start the Tokenizer Server** (for accurate DeepSeek chunking):
+    If you're using DeepSeek models and need precise text chunking for large documents, start the tokenizer server:
+    ```bash
+    # Run the tokenizer server startup script
+    python start_tokenizer_server.py
+    ```
+    This requires Python with the dependencies listed in `deepseek_v3_tokenizer/requirements.txt`. The script will help you install these if needed.
+
+## Batch Processing and Chunking
+
+For large texts, the application automatically breaks content into manageable chunks:
+
+* **Groq Models**: Splits text into ~22,000 word chunks
+* **DeepSeek Models**: Uses the tokenizer server to create 6,000 token chunks
+
+This chunking happens transparently to the user. If the tokenizer server isn't running for DeepSeek models, a character-based approximation is used as a fallback.
 
 ## Disclaimer
 

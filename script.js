@@ -76,7 +76,8 @@ const CONSTANTS = {
         TEMPERATURE: 'temperature',
         GROQ_API_KEY: 'groqApiKey',
         DEEPSEEK_API_KEY: 'deepseekApiKey',
-        SAVED_PROMPTS: 'fanficTranslatorSavedPrompts' // New key for saved prompts
+        SAVED_PROMPTS: 'fanficTranslatorSavedPrompts', // New key for saved prompts
+        TOKENIZER_TUNNEL_URL: 'tokenizer_tunnel_url' // Store the tokenizer tunnel URL
         // DARK_MODE: 'darkMode' // Not actively used for setting, but was a key
     },
     API_KEY_PLACEHOLDERS: {
@@ -92,6 +93,55 @@ const CONSTANTS = {
     }
 };
 
+// Get the tokenizer URL dynamically
+function getTokenizerUrl() {
+    try {
+        // Try to fetch from tunnel_config.json first
+        const tunnelConfigUrl = 'tunnel_config.json';
+        const cachedConfigKey = CONSTANTS.LOCAL_STORAGE_KEYS.TOKENIZER_TUNNEL_URL;
+        const cachedUrl = localStorage.getItem(cachedConfigKey);
+        
+        // First check if we have a cached URL
+        if (cachedUrl) {
+            console.log(`Using cached tokenizer tunnel URL: ${cachedUrl}`);
+            // We'll still try to fetch the latest in the background
+            fetch(tunnelConfigUrl)
+                .then(response => response.json())
+                .then(config => {
+                    if (config && config.tokenizer_url) {
+                        console.log(`Updated tokenizer tunnel URL: ${config.tokenizer_url}`);
+                        localStorage.setItem(cachedConfigKey, config.tokenizer_url);
+                    }
+                })
+                .catch(err => console.warn(`Could not fetch latest tunnel config: ${err.message}`));
+            return cachedUrl;
+        }
+        
+        // If no cached URL, check for a tunneled URL synchronously using a fake XHR
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', tunnelConfigUrl, false); // Synchronous request
+        xhr.send(null);
+        
+        if (xhr.status === 200) {
+            const config = JSON.parse(xhr.responseText);
+            if (config && config.tokenizer_url) {
+                console.log(`Using tokenizer tunnel URL: ${config.tokenizer_url}`);
+                localStorage.setItem(cachedConfigKey, config.tokenizer_url);
+                return config.tokenizer_url;
+            }
+        }
+    } catch (error) {
+        console.warn(`Error getting tokenizer URL: ${error.message}`);
+    }
+    
+    // Default to localhost if no tunneled URL found
+    console.log('Using default localhost tokenizer URL');
+    return 'http://localhost:5000';
+}
+
+// Define the tokenizer server URL
+const TOKENIZER_SERVER_URL = getTokenizerUrl();
+
 // API Key (Replace with secure handling in production)
 // These will be populated from localStorage by loadFromLocalStorage
 let groqApiKey = ''; 
@@ -103,6 +153,8 @@ const defaultPromptTemplate = `You are an expert fanfiction translator. Your tas
 Fandom Context:{fandom_context}
 
 Previous Chapter Summary (for continuity):{previous_chapter_summary}
+
+Previous Chunk Summaries (for context):{previous_chunk_summaries}
 
 Translator Notes & Special Instructions:{notes}
 
@@ -276,8 +328,8 @@ function updateWordCount(textElement, countElement) {
         text = textElement.value || '';
     }
     
-    // Count words and characters
-    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    // Count words and characters using the CJK-aware getWordCount function
+    const words = text.trim() ? getWordCount(text.trim()) : 0;
     const chars = text.length;
     
     // Update the counter display
@@ -418,7 +470,7 @@ function updatePricingDisplay() {
 // Handle Temperature Slider Change
 function handleTemperatureChange() {
     const tempValue = parseFloat(temperatureSlider.value).toFixed(1);
-    temperatureValueDisplay.textContent = tempValue;
+        temperatureValueDisplay.textContent = tempValue;
     saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.TEMPERATURE, tempValue);
     console.log(`[Settings] Temperature changed to: ${tempValue}`);
 }
@@ -466,19 +518,235 @@ function updateTranslationState(isTranslating) {
     // Optionally disable other controls during translation
     modelSelect.disabled = isTranslating;
     temperatureSlider.disabled = isTranslating;
-    streamToggle.disabled = isTranslating;
+    // streamToggle.disabled = isTranslating; // Keep stream toggle enabled for chunk-wise decision if needed, or disable too.
+}
+
+// Helper function to count words, more accurately for CJK-like languages
+function getWordCount(text) {
+    if (!text) return 0;
+    // Simple heuristic: if text contains Chinese characters, or generally lacks spaces,
+    // count characters as words. Otherwise, split by space.
+    const chineseRegex = /[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/; // Basic CJK, Full-width punctuation
+    const hasChinese = chineseRegex.test(text);
+    const hasSpaces = /\s/.test(text.trim());
+
+    if (hasChinese && !hasSpaces) { // Primarily Chinese text without many spaces
+        return text.replace(/\s+/g, '').length; // Count non-whitespace characters
+    } else if (hasChinese && hasSpaces) {
+         // Mixed content or Chinese with spaces
+         // For simplicity, if Chinese chars are present, use character count as a proxy
+        return text.length; // Fallback to char count if CJK detected
+    }
+    return text.trim().split(/\s+/).length; // Default for space-separated languages
+}
+
+// Function to split text into chunks
+async function createTextChunks(text, modelName) {
+    console.log(`[Chunker] Creating text chunks for model: ${modelName}`);
+    const DEFAULT_GROK_TOKENS = 22000; // For Grok models
+    const DEFAULT_DEEPSEEK_TOKENS = 6000; // For DeepSeek models
+    // Use the global TOKENIZER_SERVER_URL constant instead of hardcoded value
+    // const tokenizerServerUrl = 'http://localhost:5000'; // URL to the Flask tokenizer server
+
+    let chunks = [];
+    let maxTokens;
+
+    if (modelName.startsWith(CONSTANTS.MODELS.GROQ_PREFIX)) {
+        maxTokens = DEFAULT_GROK_TOKENS;
+        console.log(`[Chunker] Using Grok model, setting max tokens to ${maxTokens}`);
+    } else if (modelName === CONSTANTS.MODELS.DEEPSEEK_CHAT) {
+        maxTokens = DEFAULT_DEEPSEEK_TOKENS;
+        console.log(`[Chunker] Using DeepSeek model, setting max tokens to ${maxTokens}`);
+    } else {
+        console.error('[Chunker] Unknown model type for chunking:', modelName);
+        return [text.trim()].filter(chunk => chunk.length > 0);
+    }
+
+    try {
+        // Attempt to use the tokenizer server for chunking
+        console.log(`[Chunker] Attempting to use tokenizer server at ${TOKENIZER_SERVER_URL} with max_tokens: ${maxTokens}`);
+        const healthResponse = await fetch(`${TOKENIZER_SERVER_URL}/health`, { 
+            method: 'GET' 
+        }).catch(error => {
+            console.error('[Chunker] Error connecting to tokenizer server:', error);
+            throw new Error('Tokenizer server not reachable');
+        });
+
+        if (!healthResponse.ok) {
+            throw new Error(`Tokenizer server health check failed: ${healthResponse.status}`);
+        }
+
+        // If server is available, use it for chunking
+        console.log('[Chunker] Tokenizer server is available. Requesting chunking...');
+        const chunkResponse = await fetch(`${TOKENIZER_SERVER_URL}/chunk`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                text: text,
+                max_tokens: maxTokens
+            })
+        });
+
+        if (!chunkResponse.ok) {
+            const errorData = await chunkResponse.json().catch(() => ({ error: 'Server returned non-OK status and failed to parse error JSON.' }));
+            throw new Error(`Server chunking failed: ${chunkResponse.status} - ${errorData.error || 'Unknown server error'}`);
+    }
+
+        const chunkData = await chunkResponse.json();
+        chunks = chunkData.chunks;
+        
+        // Debug server response
+        console.log("[Chunker] Server response summary:", {
+            chunks_count: chunkData.chunk_count,
+            max_tokens_setting: chunkData.max_tokens_setting,
+            actual_tokens: chunkData.actual_total_tokens_in_chunks
+        });
+        console.log(`[Chunker] Received ${chunks.length} chunks from server`);
+        
+        if (chunks.length > 0) {
+            chunks.forEach((chunk, i) => {
+                console.log(`[Chunker] Chunk ${i+1} preview: ${chunk.substring(0, 50)}... (${chunk.length} chars)`);
+            });
+        }
+
+    } catch (error) {
+        console.error('[Chunker] Tokenizer server error:', error.message);
+        console.warn('[Chunker] Falling back to character-based chunking. This is a rough approximation!');
+        
+        // Fallback: Use character-based approximation
+        const CHARS_PER_TOKEN_ESTIMATE = 4; // General estimate
+        const maxCharsFallback = maxTokens * CHARS_PER_TOKEN_ESTIMATE;
+        let currentChunk = '';
+        chunks = []; // Reset chunks for fallback logic
+        let accumulatedCharsInCurrentChunk = 0;
+
+        // Split by one or more newlines to treat lines as paragraphs
+        const textLines = text.split(/\r?\n/);
+        let paragraphBuffer = [];
+
+        function finalizeCurrentChunk() {
+            if (currentChunk.length > 0) {
+                chunks.push(currentChunk.trim());
+                currentChunk = '';
+                accumulatedCharsInCurrentChunk = 0;
+            }
+        }
+
+        function addParagraphToChunk(pText) {
+            if (currentChunk.length > 0) { // If current chunk has content, add paragraph separator
+                currentChunk += '\n\n'; // Use double newline to reconstruct paragraph structure
+                accumulatedCharsInCurrentChunk += 2; // Account for the separator
+            }
+            currentChunk += pText;
+            accumulatedCharsInCurrentChunk += pText.length;
+        }
+
+        for (const line of textLines) {
+            if (line.trim() === '') { // Empty line signifies a paragraph break
+                if (paragraphBuffer.length > 0) {
+                    let currentParagraph = paragraphBuffer.join('\n');
+                    paragraphBuffer = [];
+
+                    // Process this paragraph
+                    if (accumulatedCharsInCurrentChunk + currentParagraph.length + (currentChunk.length > 0 ? 2 : 0) > maxCharsFallback && accumulatedCharsInCurrentChunk > 0) {
+                        finalizeCurrentChunk();
+                    }
+
+                    if (currentParagraph.length > maxCharsFallback && accumulatedCharsInCurrentChunk === 0) {
+                        // Paragraph itself is too big and chunk is empty
+                        let pToSplit = currentParagraph;
+                        while (pToSplit.length > 0) {
+                            let subP = pToSplit.substring(0, maxCharsFallback);
+                            chunks.push(subP.trim()); // Add as a new chunk directly
+                            pToSplit = pToSplit.substring(subP.length);
+                        }
+                    } else if (currentParagraph.length + accumulatedCharsInCurrentChunk + (currentChunk.length > 0 ? 2:0) <= maxCharsFallback) {
+                         addParagraphToChunk(currentParagraph);
+                    } else {
+                         // Paragraph won't fit, finalize current and start new with this one (if it fits alone)
+                         finalizeCurrentChunk();
+                         if (currentParagraph.length <= maxCharsFallback) {
+                             addParagraphToChunk(currentParagraph);
+                         } else { // Still too big, split it
+                            let pToSplit = currentParagraph;
+                            while (pToSplit.length > 0) {
+                                let subP = pToSplit.substring(0, maxCharsFallback);
+                                chunks.push(subP.trim());
+                                pToSplit = pToSplit.substring(subP.length);
+                            }
+                         }
+                    }
+                }
+            } else {
+                paragraphBuffer.push(line);
+            }
+        }
+        
+        // Process any remaining text in paragraphBuffer
+        if (paragraphBuffer.length > 0) {
+            let currentParagraph = paragraphBuffer.join('\n');
+            if (accumulatedCharsInCurrentChunk + currentParagraph.length + (currentChunk.length > 0 ? 2 : 0) > maxCharsFallback && accumulatedCharsInCurrentChunk > 0) {
+                finalizeCurrentChunk();
+            }
+            if (currentParagraph.length > maxCharsFallback && accumulatedCharsInCurrentChunk === 0) {
+                let pToSplit = currentParagraph;
+                while (pToSplit.length > 0) {
+                    let subP = pToSplit.substring(0, maxCharsFallback);
+                    chunks.push(subP.trim()); 
+                    pToSplit = pToSplit.substring(subP.length);
+                }
+            } else if (currentParagraph.length + accumulatedCharsInCurrentChunk + (currentChunk.length > 0 ? 2:0) <= maxCharsFallback) {
+                    addParagraphToChunk(currentParagraph);
+            } else {
+                    finalizeCurrentChunk();
+                    if (currentParagraph.length <= maxCharsFallback) {
+                        addParagraphToChunk(currentParagraph);
+                    } else { 
+                    let pToSplit = currentParagraph;
+                    while (pToSplit.length > 0) {
+                        let subP = pToSplit.substring(0, maxCharsFallback);
+                        chunks.push(subP.trim());
+                        pToSplit = pToSplit.substring(subP.length);
+                    }
+                    }
+            }
+        }
+
+        finalizeCurrentChunk(); // Add any remaining currentChunk content
+        console.log(`[Chunker] Fallback created ${chunks.length} chunks based on ~${maxCharsFallback} chars.`);
+    }
+    
+    // Ensure no empty chunks are returned, which can happen if input text is very short or just newlines.
+    chunks = chunks.filter(chunk => chunk.trim().length > 0);
+    if (chunks.length === 0 && text.trim().length > 0) { // If filtering made chunks empty but original text wasn't
+        chunks.push(text.trim()); // Add the original text as one chunk
+    }
+
+    // Log chunk stats
+    let totalChars = 0;
+    let totalWords = 0;
+    chunks.forEach((chunk, index) => {
+        const chunkWords = getWordCount(chunk);
+        totalWords += chunkWords;
+        totalChars += chunk.length;
+        console.log(`[Chunker] Chunk ${index+1}: ${chunkWords} words, ${chunk.length} chars`);
+    });
+    console.log(`[Chunker] Total: ${chunks.length} chunks, ${totalWords} words, ${totalChars} chars`);
+
+    return chunks;
 }
 
 // Main Translation Handler
 async function handleTranslation() {
     console.info('[Translate] Initiating translation process...');
-    // If translation is already in progress, don't start another
     if (translationInProgress) {
         console.warn('[Translate] Translation already in progress. New request ignored.');
         return;
     }
 
-    const textToTranslate = translationBox.value.trim();
+    const originalSourceText = translationBox.value.trim();
     const userPromptTemplate = promptBox.value.trim();
     const fandomContext = fandomBox.value.trim() || CONSTANTS.DEFAULT_VALUES.FANDOM_CONTEXT;
     const notes = notesBox.value.trim() || CONSTANTS.DEFAULT_VALUES.NOTES;
@@ -490,63 +758,119 @@ async function handleTranslation() {
     const enableStream = streamToggle.checked;
     const currentSummary = summaryBox ? summaryBox.value.trim() || CONSTANTS.DEFAULT_VALUES.SUMMARY : CONSTANTS.DEFAULT_VALUES.SUMMARY;
 
-    if (!textToTranslate) {
+    if (!originalSourceText) {
         updateStatus('Please enter text to translate.', CONSTANTS.STATUS_TYPES.WARNING);
         console.warn('[Translate] No text to translate.');
         return;
     }
-    console.log(`[Translate] Model: ${selectedModel}, Source: ${sourceLanguage}, Target: ${targetLanguage}, Temp: ${temperature}, Streaming: ${enableStream}`);
 
-    // Process prompt template variables
-    let processedPrompt = userPromptTemplate
+    updateTranslationState(true); // Set initial translating state for the whole batch
+    console.log(`[Translate] Batch translation starting. Model: ${selectedModel}, Source: ${sourceLanguage}, Target: ${targetLanguage}, Temp: ${temperature}, Streaming: ${enableStream}`);
+    
+    // Clear previous output for the new batch
+    if (outputBox) {
+        outputBox.innerHTML = ''; // Clear for rich text editor
+        if (typeof outputBox.value !== 'undefined') outputBox.value = ''; // Clear for textarea fallback
+    }
+
+    // Create progress indicator
+    const progressIndicator = document.createElement('div');
+    progressIndicator.className = 'translation-progress';
+    progressIndicator.style.cssText = 'background: #313244; padding: 10px; margin-bottom: 15px; border-radius: 5px; text-align: center; font-weight: bold;';
+    outputBox.appendChild(progressIndicator);
+
+    abortController = new AbortController(); // One controller for the whole batch
+    let overallSuccess = true;
+
+    try {
+        const textChunks = await createTextChunks(originalSourceText, selectedModel);
+        if (textChunks.length === 0) {
+            updateStatus('No text to translate after processing.', CONSTANTS.STATUS_TYPES.INFO);
+            console.warn('[Translate] No translatable chunks found.');
+            overallSuccess = false; // Or handle as an error if appropriate
+            return; // Exit if no chunks
+        }
+
+        console.log(`[Translate] Text split into ${textChunks.length} chunks for batch processing.`);
+        
+        // Update progress indicator with total chunks
+        progressIndicator.innerHTML = `<div>Preparing to translate ${textChunks.length} chunks</div>
+                                     <div style="height: 10px; background: #45475a; border-radius: 5px; margin-top: 8px;">
+                                        <div class="progress-bar" style="width: 0%; height: 100%; background: #89b4fa; border-radius: 5px; transition: width 0.3s;"></div>
+                                     </div>`;
+        
+        let chunkSummaries = []; // To store summaries for inter-chunk context (future feature)
+
+        for (let i = 0; i < textChunks.length; i++) {
+            if (abortController.signal.aborted) {
+                console.info('[Translate] Batch translation aborted by user during chunk processing.');
+                overallSuccess = false;
+                break;
+            }
+
+            const chunkTextToTranslate = textChunks[i];
+            const chunkNumber = i + 1;
+            
+            // Update progress indicator
+            const progressPercent = ((i) / textChunks.length * 100).toFixed(1);
+            progressIndicator.innerHTML = `<div>Translating chunk ${chunkNumber} of ${textChunks.length} (${progressPercent}% complete)</div>
+                                         <div style="height: 10px; background: #45475a; border-radius: 5px; margin-top: 8px;">
+                                            <div class="progress-bar" style="width: ${progressPercent}%; height: 100%; background: #89b4fa; border-radius: 5px; transition: width 0.3s;"></div>
+                                         </div>`;
+            
+            updateStatus(`Translating chunk ${chunkNumber} of ${textChunks.length}...`, CONSTANTS.STATUS_TYPES.PROCESSING, 0);
+            console.log(`[Translate] Processing chunk ${chunkNumber}/${textChunks.length}. Size: ${chunkTextToTranslate.length} chars.`);
+
+            // Add chunk header to output (except for first chunk)
+            if (i > 0 || outputBox.innerHTML.length > 0) {
+                const chunkDivider = document.createElement('div');
+                chunkDivider.className = 'chunk-divider';
+                chunkDivider.style.cssText = 'border-top: 2px dashed #45475a; margin: 20px 0; padding-top: 10px;';
+                chunkDivider.innerHTML = `<div style="color: #89b4fa; font-weight: bold; margin-bottom: 10px;">Chunk ${chunkNumber} of ${textChunks.length}</div>`;
+                outputBox.appendChild(chunkDivider);
+            }
+
+            // Process prompt template variables for the current chunk
+            let processedChunkPrompt = userPromptTemplate
         .replace(/{source_language}/g, sourceLanguage)
         .replace(/{target_language}/g, targetLanguage)
         .replace(/{fandom_context}/g, fandomContext)
         .replace(/{notes}/g, notes)
-        .replace(/{source_text}/g, textToTranslate)
-        .replace(/{previous_chapter_summary}/g, currentSummary);
-    
-    // If using a custom prompt template without {source_text}, or if it was removed, construct a fallback prompt.
-    if (!userPromptTemplate.includes('{source_text}') || !processedPrompt.includes(textToTranslate)) {
-        console.warn('Fallback prompt constructed because {source_text} was missing or removed from processed user template.');
-        processedPrompt = constructFallbackPrompt(sourceLanguage, targetLanguage, fandomContext, currentSummary, notes, textToTranslate);
+                .replace(/{source_text}/g, chunkTextToTranslate) // Use current chunk text
+                .replace(/{previous_chapter_summary}/g, currentSummary); // Summary applies to the whole work
+
+            // Add previous chunk summaries if available (for future inter-chunk summary feature)
+            if (chunkSummaries.length > 0 && processedChunkPrompt.includes('{previous_chunk_summaries}')) {
+                const formattedSummaries = chunkSummaries.map((summary, idx) => 
+                    `Chunk ${idx + 1} Summary: ${summary}`
+                ).join('\n\n');
+                processedChunkPrompt = processedChunkPrompt.replace(/{previous_chunk_summaries}/g, formattedSummaries);
+            } else if (processedChunkPrompt.includes('{previous_chunk_summaries}')) {
+                processedChunkPrompt = processedChunkPrompt.replace(/{previous_chunk_summaries}/g, 'No previous chunks translated yet.');
+            }
+
+            if (!userPromptTemplate.includes('{source_text}') || !processedChunkPrompt.includes(chunkTextToTranslate)) {
+                console.warn(`[Translate Chunk ${chunkNumber}] Fallback prompt constructed.`);
     }
 
-    updateStatus('Translating...', CONSTANTS.STATUS_TYPES.PROCESSING);
-    // Update UI state
-    updateTranslationState(true);
-    console.log('[Translate] UI state updated for translation start.');
-    // Clear previous output
-    if (outputBox) {
-        if (typeof outputBox.innerHTML !== 'undefined') {
-            outputBox.innerHTML = '';
-        } else if (typeof outputBox.value !== 'undefined') {
-            outputBox.value = '';
-        }
-    }
+            // Create a chunk container for this translation
+            const chunkContainer = document.createElement('div');
+            chunkContainer.className = 'translation-chunk';
+            chunkContainer.dataset.chunkNumber = chunkNumber;
+            outputBox.appendChild(chunkContainer);
 
-    // Create a new AbortController for this translation
-    abortController = new AbortController();
-    
-    try {
-        // If streaming, we need to set up a callback to handle chunks of text
-        let streamCallback = null;
+            let chunkStreamCallback = null;
         if (enableStream) {
-            console.log('[Translate] Streaming enabled. Setting up stream callback.');
-            streamCallback = (text) => {
+                chunkStreamCallback = (text) => {
                 if (outputBox) {
-                    // Format the text and append it to the output box
                     const formattedText = formatMarkdown(text);
-                    // Check if we have innerHTML (for contenteditable divs) or value (for textareas)
-                    if (typeof outputBox.innerHTML !== 'undefined') {
-                        // For contenteditable elements, accumulate HTML content
+                    if (chunkContainer) {
+                        chunkContainer.innerHTML += formattedText;
+                    } else if (typeof outputBox.innerHTML !== 'undefined') {
                         outputBox.innerHTML += formattedText;
                     } else if (typeof outputBox.value !== 'undefined') {
-                        // For textareas, accumulate plain text
                         outputBox.value += text;
                     }
-                    
-                    // Auto-scroll to the bottom as content is added
                     if (outputBox.scrollHeight) {
                         outputBox.scrollTop = outputBox.scrollHeight;
                     }
@@ -554,51 +878,93 @@ async function handleTranslation() {
             };
         }
         
-        const translation = await getTranslation(processedPrompt, selectedModel, temperature, enableStream, streamCallback, abortController.signal);
+            try {
+                const translation = await getTranslation(processedChunkPrompt, selectedModel, temperature, enableStream, chunkStreamCallback, abortController.signal);
         
-        if (!abortController) { // Check if translation was aborted
-            if (!enableStream) { // If not streaming, update now with the complete translation
-                console.log('[Translate] Non-streaming translation received. Updating output.');
-                if (outputBox) {
-                    const formattedTranslation = formatMarkdown(translation);
-                    if (typeof outputBox.innerHTML !== 'undefined') {
-                        outputBox.innerHTML = formattedTranslation;
-                    } else if (typeof outputBox.value !== 'undefined') {
-                        outputBox.value = translation;
-                    }
+                if (abortController.signal.aborted) {
+                    overallSuccess = false;
+                    break; 
+                }
+
+                if (!enableStream) {
+                    console.log(`[Translate Chunk ${chunkNumber}] Non-streaming translation received.`);
+                    if (chunkContainer) {
+                        const formattedTranslation = formatMarkdown(translation);
+                        chunkContainer.innerHTML = formattedTranslation;
+                    } else if (outputBox) {
+                const formattedTranslation = formatMarkdown(translation);
+                if (typeof outputBox.innerHTML !== 'undefined') {
+                            outputBox.innerHTML += (outputBox.innerHTML.length > 0 ? '<br><br>' : '') + formattedTranslation;
+                } else if (typeof outputBox.value !== 'undefined') {
+                            outputBox.value += (outputBox.value.length > 0 ? '\n\n' : '') + translation;
                 }
             }
-            updateStatus('Translation complete!', CONSTANTS.STATUS_TYPES.SUCCESS);
-            console.info('[Translate] Translation successful.');
-            
-            // Auto-save output to localStorage
-            if (outputBox) {
-                const outputContent = typeof outputBox.innerHTML !== 'undefined' ? outputBox.innerHTML : outputBox.value;
-                saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.OUTPUT_CONTENT, outputContent);
-            }
-            
-            // Enable summary button after successful translation
-            if (generateSummaryBtn) generateSummaryBtn.disabled = false;
-            
-            // Update word count
-            const outputCounter = document.getElementById('output-word-count');
-            if (outputCounter && outputBox) {
-                updateWordCount(outputBox, outputCounter);
-            }
         }
-    } catch (error) {
-        if (error.name === 'AbortError') {
-            updateStatus('Translation stopped.', CONSTANTS.STATUS_TYPES.INFO);
-            // Already logged in stopTranslation
+        
+                console.info(`[Translate Chunk ${chunkNumber}] Translation successful.`);
+                 // Update word count after each chunk if not streaming, or finally after all chunks if streaming
+                if (!enableStream) {
+                    const currentOutputCounter = document.getElementById('output-word-count');
+                    if (currentOutputCounter && outputBox) updateWordCount(outputBox, currentOutputCounter);
+                }
+
+                // Future: Generate and store summary for inter-chunk context
+                // This is where the future generateChunkSummary function would be called
+                // chunkSummaries.push(await generateChunkSummary(translation));
+
+            } catch (chunkError) {
+                overallSuccess = false;
+                if (chunkError.name === 'AbortError') {
+                    console.info(`[Translate Chunk ${chunkNumber}] Aborted by user.`);
+                } else {
+                    console.error(`[Translate Chunk ${chunkNumber}] Error:`, chunkError);
+                    updateStatus(`Error on chunk ${chunkNumber}: ${chunkError.message}`, CONSTANTS.STATUS_TYPES.ERROR, 10000);
+                    // Optionally, ask user if they want to continue with next chunk or stop all
+                    if (!confirm(`Error translating chunk ${chunkNumber}. Continue with next chunk?`)) {
+                        console.warn('[Translate] Batch translation stopped by user after chunk error.');
+                        if (abortController) abortController.abort(); // Ensure abort is called
+                    }
+                }
+                if (abortController.signal.aborted) break; // Break outer loop if user chose to stop
+            }
+        } // End of chunks loop
+
+        // Update final progress
+        const finalProgressPercent = overallSuccess && !abortController.signal.aborted ? 100 : ((textChunks.length - 1) / textChunks.length * 100).toFixed(1);
+        progressIndicator.innerHTML = `<div>Translation ${overallSuccess ? 'completed' : 'stopped'}: ${finalProgressPercent}% complete</div>
+                                     <div style="height: 10px; background: #45475a; border-radius: 5px; margin-top: 8px;">
+                                        <div class="progress-bar" style="width: ${finalProgressPercent}%; height: 100%; background: ${overallSuccess ? '#a6e3a1' : '#f38ba8'}; border-radius: 5px;"></div>
+                                     </div>`;
+
+        if (overallSuccess && !abortController.signal.aborted) {
+            updateStatus('All chunks translated successfully!', CONSTANTS.STATUS_TYPES.SUCCESS);
+            console.info('[Translate] Batch translation fully successful.');
+        } else if (abortController.signal.aborted) {
+            updateStatus('Batch translation stopped by user.', CONSTANTS.STATUS_TYPES.INFO);
+            // Logged by stopTranslation or within loop
         } else {
-            console.error('[Translate] Translation Error:', error);
-            updateStatus('Error: ' + error.message, CONSTANTS.STATUS_TYPES.ERROR);
+            updateStatus('Batch translation completed with some errors.', CONSTANTS.STATUS_TYPES.WARNING);
+            console.warn('[Translate] Batch translation completed with errors.');
         }
+
+    } catch (error) {
+        // This catch is for errors in createTextChunks or other setup before the loop
+        console.error('[Translate] General batch translation error:', error);
+        updateStatus('Error in batch translation setup: ' + error.message, CONSTANTS.STATUS_TYPES.ERROR);
+        overallSuccess = false;
     } finally {
-        console.log('[Translate] Translation process finished (finally block).');
-        // Reset UI state when done or on error
-        updateTranslationState(false);
-        abortController = null;
+        console.log('[Translate] Batch translation process finished (finally block).');
+        updateTranslationState(false); // Reset UI state for the whole batch process
+        // Update final word count for the entire output
+        const finalOutputCounter = document.getElementById('output-word-count');
+        if (finalOutputCounter && outputBox) updateWordCount(outputBox, finalOutputCounter);
+        
+        if (overallSuccess && !abortController.signal.aborted) {
+             if (generateSummaryBtn) generateSummaryBtn.disabled = false;
+        } else {
+            if (generateSummaryBtn) generateSummaryBtn.disabled = true; // Keep disabled if batch had issues or was stopped
+        }
+        abortController = null; // Clear the controller
     }
 }
 
@@ -667,7 +1033,8 @@ function getApiConfig(model, prompt, temperature, stream) {
             model: model,
             messages: [{ role: "user", content: prompt }],
             temperature: temperature,
-            stream: stream
+            stream: stream,
+            max_tokens: 8000 // Set max_tokens for DeepSeek
         };
     } else {
         throw new Error(`Unsupported model selected: ${model}`);
@@ -1313,7 +1680,7 @@ function handleDeleteSelectedPrompt() {
         updateStatus('Please select a prompt template to delete.', CONSTANTS.STATUS_TYPES.INFO);
         console.log('[PromptTemplate] Delete failed: No prompt selected from dropdown.');
         return;
-    }
+        }
 
     if (!confirm(`Are you sure you want to delete the prompt template '${selectedName}\'?`)) {
         console.log('[PromptTemplate] Deletion of prompt declined by user.');
