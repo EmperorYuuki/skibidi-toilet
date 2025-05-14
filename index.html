@@ -185,6 +185,11 @@
                         <div class="textarea-controls glossary-ai-controls">
                             <button id="ai-generate-glossary-btn" class="action-btn"><i class="fas fa-robot"></i> Generate Glossary with AI</button>
                         </div>
+                        <div class="input-group checkbox-group" id="glossary-replace-toggle-group">
+                            <input type="checkbox" id="glossary-replace-toggle" name="glossary-replace-toggle">
+                            <label for="glossary-replace-toggle">Replace Non-Character Terms in Source Text</label>
+                            <span class="tooltip" title="If checked, terms from glossary (except 'Characters') will be automatically replaced in the Source Text area. The {glossary_terms} prompt placeholder will then only include 'Characters'.">(?)</span>
+                        </div>
                         <div class="input-group">
                             <label for="glossary-category">Category (Optional):</label>
                             <input type="text" id="glossary-category" placeholder="e.g., Names, Locations (leave blank for default)">

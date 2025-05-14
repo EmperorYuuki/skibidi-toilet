@@ -284,6 +284,12 @@ textarea, #translation-box, .output-box, #output-box {
     flex-grow: 1;
 }
 
+/* Specific override for prompt-box height */
+#prompt-box {
+    min-height: 200px !important;
+    max-height: 400px !important;
+}
+
 /* Input fields */
 .input-group {
     display: flex;
@@ -613,6 +619,25 @@ button:active:not(:disabled) {
     display: flex;
     justify-content: flex-start;
 }
+
+/* Glossary Replace Toggle Specific Styling */
+#glossary-replace-toggle-group {
+    margin-bottom: var(--space-md); /* Add some space below the toggle */
+    align-items: center; /* Vertically align checkbox and label */
+}
+
+#glossary-replace-toggle-group label {
+    font-size: 0.8rem; /* Match other labels */
+    color: var(--text-regular); /* Standard text color for toggle label */
+    margin-bottom: 0; /* Remove default label margin from input-group */
+}
+
+#glossary-replace-toggle-group .tooltip {
+    font-size: 0.75rem; /* Match other tooltips */
+    margin-left: var(--space-xs);
+    cursor: help;
+}
+
 #glossary-display-area {
     max-height: 120px;
     overflow-y: auto;
@@ -621,6 +646,12 @@ button:active:not(:disabled) {
     padding: var(--space-xs);
     background-color: var(--input-bg);
 }
+
+/* Increase glossary display area height */
+#glossary-display-area {
+    max-height: 250px !important;
+}
+
 .glossary-list ul {
     padding-left: 0;
     list-style-type: none;

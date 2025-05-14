@@ -86,7 +86,8 @@ const CONSTANTS = {
         DEEPSEEK_API_KEY: 'deepseekApiKey',
         SAVED_PROMPTS: 'fanficTranslatorSavedPrompts',
         INTER_CHUNK_SUMMARY_ENABLED: 'interChunkSummaryEnabled', // New key
-        GLOSSARY_TERMS: 'fanficTranslatorGlossary' // Key for glossary
+        GLOSSARY_TERMS: 'fanficTranslatorGlossary', // Key for glossary
+        GLOSSARY_REPLACE_TOGGLE: 'fanficTranslatorGlossaryReplaceToggle' // New key for the toggle
         // DARK_MODE: 'darkMode' // Not actively used for setting, but was a key
     },
     API_KEY_PLACEHOLDERS: {
@@ -261,12 +262,15 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
         const outputCounterElement = document.getElementById('output-word-count'); // Corrected ID
         
         if (sourceCounterElement && translationBox) {
-            const debouncedUpdateInputWordCount = debounce(() => {
-                updateWordCount(translationBox, sourceCounterElement);
-                updateTokenCountAndCost(); // Call new function
+            const debouncedUpdateInputWordCountAndReplace = debounce(() => {
+                updateWordCount(translationBox, document.getElementById('input-word-count'));
+                updateTokenCountAndCost();
+                if (glossaryReplaceActive) { // Check toggle state
+                    console.log('[InputDebounce] Glossary replace active, calling handleReplaceInInput.');
+                    debouncedHandleReplaceInInput(); // No force, let the function decide based on its internal toggle check
+                }
             }, 250);
-            // updateWordCount(translationBox, sourceCounterElement); // Initial call handled later in DOMContentLoaded after loading storage
-            translationBox.addEventListener('input', debouncedUpdateInputWordCount);
+            translationBox.addEventListener('input', debouncedUpdateInputWordCountAndReplace);
         }
         
         if (outputCounterElement && outputBox) {
@@ -603,6 +607,7 @@ function handleTemperatureChange() {
 // Variables for managing translation state
 let translationInProgress = false;
 let abortController = null;
+let glossaryReplaceActive = false; // Global state for the toggle
 
 // Stop translation function
 function stopTranslation() {
@@ -866,7 +871,7 @@ async function handleTranslation() {
         return;
     }
 
-    const originalSourceText = translationBox.value.trim();
+    const originalSourceText = translationBox.value.trim(); // Use current value, which might have been replaced
     const userPromptTemplate = promptBox.value.trim();
     const fandomContext = fandomBox.value.trim() || CONSTANTS.DEFAULT_VALUES.FANDOM_CONTEXT;
     const notes = notesBox.value.trim() || CONSTANTS.DEFAULT_VALUES.NOTES;
@@ -879,11 +884,44 @@ async function handleTranslation() {
     const currentSummary = summaryBox ? summaryBox.value.trim() || CONSTANTS.DEFAULT_VALUES.SUMMARY : CONSTANTS.DEFAULT_VALUES.SUMMARY;
     const glossary = getGlossary();
     let formattedGlossary = 'None provided.';
-    if (Object.keys(glossary).length > 0) {
-        formattedGlossary = Object.entries(glossary)
-            .map(([term, translation]) => `${term}: ${translation}`)
-            .join('\n');
+    const termsForPrompt = [];
+
+    if (glossaryReplaceActive) {
+        // If replacement is ON, only add Character names to the prompt placeholder
+        console.log('[Translate] Glossary replace is ON. Formatting placeholder with Character names only.');
+        for (const categoryName in glossary) {
+            if (glossary.hasOwnProperty(categoryName) && CHARACTER_GLOSSARY_CATEGORIES.includes(categoryName)) {
+                const termsInCategory = glossary[categoryName];
+                for (const term in termsInCategory) {
+                    if (termsInCategory.hasOwnProperty(term)) {
+                        termsForPrompt.push(`${term}: ${termsInCategory[term]}`);
+                    }
+                }
+            }
+        }
+        if (termsForPrompt.length === 0) {
+            formattedGlossary = 'No character names provided in glossary.';
+        }
+    } else {
+        // If replacement is OFF, add all terms to the prompt placeholder
+        console.log('[Translate] Glossary replace is OFF. Formatting placeholder with all terms.');
+        for (const categoryName in glossary) {
+            if (glossary.hasOwnProperty(categoryName)) {
+                const termsInCategory = glossary[categoryName];
+                for (const term in termsInCategory) {
+                    if (termsInCategory.hasOwnProperty(term)) {
+                        termsForPrompt.push(`${term}: ${termsInCategory[term]}`);
+                    }
+                }
+            }
+        }
     }
+    
+    if (termsForPrompt.length > 0) {
+        formattedGlossary = termsForPrompt.join('\n');
+    }
+    // If still 'None provided.' (e.g. replace ON and no characters, or replace OFF and empty glossary)
+    // formattedGlossary will retain its default or updated 'No character names...' value.
 
     if (!originalSourceText) {
         updateStatus('Please enter text to translate.', CONSTANTS.STATUS_TYPES.WARNING);
@@ -1734,6 +1772,30 @@ function loadFromLocalStorage() {
             updateWordCount(outputBox, document.getElementById('output-word-count'));
         }
         updateTokenCountAndCost(); // Initial call on load
+
+        // Load and set glossary replace toggle state
+        const glossaryReplaceToggleElement = document.getElementById('glossary-replace-toggle');
+        if (glossaryReplaceToggleElement) {
+            const savedReplaceToggle = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_REPLACE_TOGGLE);
+            glossaryReplaceActive = savedReplaceToggle === 'true';
+            glossaryReplaceToggleElement.checked = glossaryReplaceActive;
+            console.log(`[GlossaryReplace] Initial toggle state: ${glossaryReplaceActive}`);
+            
+            glossaryReplaceToggleElement.addEventListener('change', () => {
+                glossaryReplaceActive = glossaryReplaceToggleElement.checked;
+                saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_REPLACE_TOGGLE, glossaryReplaceActive);
+                console.log(`[GlossaryReplace] Toggle changed to: ${glossaryReplaceActive}`);
+                if (glossaryReplaceActive) {
+                    debouncedHandleReplaceInInput(true); // Force replace when toggled on
+                } else {
+                    // Optional: Add logic here if something needs to happen when toggled OFF
+                    // For now, toggling off just stops future auto-replacements.
+                    // The original text is not restored automatically.
+                    updateStatus('Glossary auto-replace OFF. Manual prompt placeholder will use all terms.', CONSTANTS.STATUS_TYPES.INFO);
+                }
+            });
+        }
+
     } catch (error) {
         console.error("[LocalStorage] Error during loadFromLocalStorage:", error);
         updateStatus("Could not load settings from local storage. It might be disabled or inaccessible.", CONSTANTS.STATUS_TYPES.ERROR, 0);
@@ -1994,6 +2056,7 @@ if (interChunkSummaryToggleElement) {
 
 // --- Glossary Management Functions ---
 const DEFAULT_GLOSSARY_CATEGORY = 'Ungategorized'; // Default category
+const CHARACTER_GLOSSARY_CATEGORIES = ["Characters"]; // Define which categories are considered character names
 
 function getGlossary() {
     const glossaryJson = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_TERMS);
@@ -2021,6 +2084,12 @@ function renderGlossary() {
     if (!glossaryDisplayArea || !noGlossaryTermsMsg) return;
     const glossary = getGlossary();
     glossaryDisplayArea.innerHTML = ''; // Clear previous terms
+
+    // If glossary replace is active, trigger a replace when glossary is re-rendered
+    // This covers cases where glossary changes (add, delete, edit, AI gen)
+    if (glossaryReplaceActive) {
+        debouncedHandleReplaceInInput();
+    }
 
     const categories = Object.keys(glossary);
 
@@ -2501,3 +2570,55 @@ async function updateTokenCountAndCost() {
     }
 }
 // --- End of Token Count and Cost Estimation Functions ---
+
+// Debounced version of handleReplaceInInput
+const debouncedHandleReplaceInInput = debounce(handleReplaceInInput, 1000); 
+
+// Function to replace glossary terms in input text
+function handleReplaceInInput(forceReplace = false) {
+    if (!glossaryReplaceActive && !forceReplace) {
+        console.log('[GlossaryReplace] Toggle is OFF and not forced, skipping replacement.');
+        return;
+    }
+    if (!translationBox) return;
+
+    console.log('[GlossaryReplace] Starting glossary replacement in source text...');
+    let text = translationBox.value;
+    const glossary = getGlossary();
+    let termsReplacedCount = 0;
+
+    // Create a sorted list of terms by length (descending) to replace longer matches first
+    const allTermsToReplace = [];
+    for (const categoryName in glossary) {
+        if (glossary.hasOwnProperty(categoryName) && !CHARACTER_GLOSSARY_CATEGORIES.includes(categoryName)) {
+            const termsInCategory = glossary[categoryName];
+            for (const sourceTerm in termsInCategory) {
+                if (termsInCategory.hasOwnProperty(sourceTerm)) {
+                    allTermsToReplace.push({ source: sourceTerm, target: termsInCategory[sourceTerm] });
+                }
+            }
+        }
+    }
+    // Sort by source term length, longest first to avoid partial replacements (e.g., replacing "King" before "Kingdom")
+    allTermsToReplace.sort((a, b) => b.source.length - a.source.length);
+
+    for (const termObj of allTermsToReplace) {
+        const sourceTermRegex = new RegExp(termObj.source.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&'), 'g'); // Escape regex special chars
+        if (text.includes(termObj.source)) { // Basic check to see if replacement is needed
+            text = text.replace(sourceTermRegex, termObj.target);
+            termsReplacedCount++;
+            // console.log(`[GlossaryReplace] Replaced "${termObj.source}" with "${termObj.target}"`);
+        }
+    }
+
+    if (termsReplacedCount > 0) {
+        translationBox.value = text;
+        // Trigger input event for word count and auto-save
+        translationBox.dispatchEvent(new Event('input', { bubbles: true })); 
+        updateStatus(`${termsReplacedCount} non-character glossary term(s) replaced in source text.`, CONSTANTS.STATUS_TYPES.SUCCESS, 3000);
+        console.log(`[GlossaryReplace] Finished. Replaced ${termsReplacedCount} term(s).`);
+    } else {
+        // updateStatus('No non-character glossary terms found to replace in source text.', CONSTANTS.STATUS_TYPES.INFO, 2000);
+        console.log('[GlossaryReplace] Finished. No terms needed replacement or found.');
+    }
+}
