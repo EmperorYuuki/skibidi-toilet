@@ -1,25 +1,6 @@
-# Tokenizer and related files
-deepseek_v3_tokenizer/
-start_tokenizer_server.py
-tunnel_server.js
-package.json
-tunnel_config.json
-TOKENIZER_SETUP.md
 
-# Python-related
-__pycache__/
-*.py[cod]
-*$py.class
-.env
-.venv
-env/
-venv/
-ENV/
+readme.md
 
-# Node.js-related
-node_modules/
-npm-debug.log
+start_tokenizer.py
 
-# System files
-.DS_Store
-Thumbs.db 
+deepseek_v3_tokenizer/ 

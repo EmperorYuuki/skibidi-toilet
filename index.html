@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
+    <div class="app-container">
         <header class="app-header">
             <h1><i class="fas fa-language"></i> Fanfic Translator</h1>
             <div class="header-controls">
@@ -82,13 +82,22 @@
             </div>
         </div>
 
-        <div class="main-content">
-            <div class="left-panel">
+        <div class="main-content-area">
+            <aside class="panel left-panel" aria-labelledby="left-panel-heading">
+                <h2 id="left-panel-heading" class="panel-main-title visually-hidden">Input and Controls</h2>
                 <div class="card">
                     <div class="card-header">
                         <h2><i class="fas fa-file-alt"></i> Source Text</h2>
-                        <div class="word-counter" id="input-word-count">
-                            0 words | 0 chars
+                        <div class="header-info-counters">
+                            <div class="word-counter" id="input-word-count">
+                                0 words | 0 chars
+                            </div>
+                            <div class="token-counter" id="input-token-count">
+                                Estimated Tokens: N/A
+                            </div>
+                            <div class="cost-estimator" id="input-cost-estimate">
+                                Estimated Cost: N/A
+                            </div>
                         </div>
                     </div>
                     <textarea id="translation-box" placeholder="Enter text to translate here..."></textarea>
@@ -145,12 +154,34 @@
                         <button id="save-notes-btn" class="save-btn"><i class="fas fa-save"></i> Save</button>
                     </div>
                 </div>
-            </div>
-            
-            <div class="right-panel">
-                <div class="card output-area" id="output-area">
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-book"></i> Glossary / Terminology</h2>
+                    </div>
+                    <div class="input-group">
+                        <label for="glossary-term-source">Term (Source Language):</label>
+                        <input type="text" id="glossary-term-source" placeholder="e.g., おはよう">
+                    </div>
+                    <div class="input-group">
+                        <label for="glossary-term-target">Preferred Translation (Target Language):</label>
+                        <input type="text" id="glossary-term-target" placeholder="e.g., Good morning">
+                    </div>
+                    <div class="textarea-controls">
+                        <button id="add-glossary-term-btn" class="action-btn"><i class="fas fa-plus-circle"></i> Add Term</button>
+                    </div>
+                    <div id="glossary-display-area" class="glossary-list">
+                        <!-- Glossary terms will be listed here -->
+                        <p class="no-glossary-terms" style="display: none;">No glossary terms defined yet.</p>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="panel middle-panel" aria-labelledby="middle-panel-heading">
+                <h2 id="middle-panel-heading" class="panel-main-title visually-hidden">Translation Output</h2>
+                <div class="card output-card">
                     <div class="card status-bar">
-                        <p id="status-message">Ready to translate</p>
+                        <p id="status-message" aria-live="polite">Ready to translate</p>
                         <div id="progress-indicator-container" class="progress-indicator-container"></div>
                     </div>
                     <div class="card-header">
@@ -177,7 +208,10 @@
                         <button id="add-to-prompt-btn" class="action-btn"><i class="fas fa-plus-circle"></i> Add to Prompt</button>
                     </div>
                 </div>
-                
+            </main>
+
+            <aside class="panel right-panel" aria-labelledby="right-panel-heading">
+                <h2 id="right-panel-heading" class="panel-main-title visually-hidden">Settings and Tools</h2>
                 <div class="card">
                     <div class="card-header">
                         <h2><i class="fas fa-users"></i> Fandom Context</h2>
@@ -188,7 +222,7 @@
                         <button class="save-btn" data-target="fandom-box"><i class="fas fa-save"></i> Save</button>
                     </div>
                 </div>
-            </div>
+            </aside>
         </div>
         
         <div class="status-area">
@@ -202,10 +236,10 @@
         </div>
         
         <!-- API Settings Modal -->
-        <div id="api-settings-modal" class="modal" style="display: none;">
+        <div id="api-settings-modal" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="api-settings-heading">
             <div class="modal-content card">
                 <div class="card-header">
-                    <h2><i class="fas fa-key"></i> API Settings</h2>
+                    <h2 id="api-settings-heading"><i class="fas fa-key"></i> API Settings</h2>
                     <button id="close-api-modal" class="close-btn"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="input-group">

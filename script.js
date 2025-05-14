@@ -13,7 +13,6 @@ const statusMessage = document.getElementById('status-message');
 const pricingDisplay = document.getElementById('pricing-display');
 const copyOutputBtn = document.getElementById('copy-output-btn');
 const saveButtons = document.querySelectorAll('.save-btn');
-const darkModeToggle = document.getElementById('dark-mode-toggle');
 const temperatureSlider = document.getElementById('temperature-slider');
 const temperatureValueDisplay = document.getElementById('temperature-value');
 const sourceLanguageInput = document.getElementById('source-language');
@@ -28,16 +27,23 @@ const copySummaryBtn = document.getElementById('copy-summary-btn');
 const useSummaryBtn = document.getElementById('use-summary-btn');
 const progressIndicatorContainer = document.getElementById('progress-indicator-container'); // New progress container
 
+// Glossary DOM Elements
+const glossaryTermSourceInput = document.getElementById('glossary-term-source');
+const glossaryTermTargetInput = document.getElementById('glossary-term-target');
+const addGlossaryTermBtn = document.getElementById('add-glossary-term-btn');
+const glossaryDisplayArea = document.getElementById('glossary-display-area');
+const noGlossaryTermsMsg = document.querySelector('.no-glossary-terms');
+
+// Tokenizer and Cost DOM Elements
+const inputTokenCountEl = document.getElementById('input-token-count');
+const inputCostEstimateEl = document.getElementById('input-cost-estimate');
+
 // Prompt Template Management DOM Elements
 const promptTemplateNameInput = document.getElementById('prompt-template-name');
 const savePromptAsBtn = document.getElementById('save-prompt-as-btn');
 const savedPromptsSelect = document.getElementById('saved-prompts-select');
 const loadPromptBtn = document.getElementById('load-prompt-btn');
 const deletePromptBtn = document.getElementById('delete-prompt-btn');
-
-// Word count display elements - to be initialized in DOMContentLoaded
-// let inputWordCountEl = null; // No longer needed
-// let outputWordCountEl = null; // No longer needed
 
 // Clear All button from the main app controls
 const clearAllAppBtn = document.getElementById('clear-all-btn'); 
@@ -76,19 +82,27 @@ const CONSTANTS = {
         SELECTED_MODEL: 'selectedModel',
         SOURCE_LANGUAGE: 'sourceLanguage',
         TEMPERATURE: 'temperature',
-        GROQ_API_KEY: 'groqApiKey',
+        GROK_API_KEY: 'grokApiKey',
         DEEPSEEK_API_KEY: 'deepseekApiKey',
         SAVED_PROMPTS: 'fanficTranslatorSavedPrompts',
-        INTER_CHUNK_SUMMARY_ENABLED: 'interChunkSummaryEnabled' // New key
+        INTER_CHUNK_SUMMARY_ENABLED: 'interChunkSummaryEnabled', // New key
+        GLOSSARY_TERMS: 'fanficTranslatorGlossary' // Key for glossary
         // DARK_MODE: 'darkMode' // Not actively used for setting, but was a key
     },
     API_KEY_PLACEHOLDERS: {
-        GROQ: 'YOUR_GROQ_API_KEY',
+        GROK: 'YOUR_GROK_API_KEY',
         DEEPSEEK: 'YOUR_DEEPSEEK_API_KEY'
     },
     MODELS: {
-        GROQ_PREFIX: 'grok-',
-        DEEPSEEK_CHAT: 'deepseek-chat'
+        GROK_PREFIX: 'grok-',
+        DEEPSEEK_CHAT: 'deepseek-chat',
+        DEFAULT_MAX_OUTPUT_TOKENS_GROK: 131072, // Reverted to original value
+        DEFAULT_MAX_OUTPUT_TOKENS_DEEPSEEK: 8000   // Added
+    },
+    CHUNKING: { // Added new category for chunking constants
+        DEFAULT_GROK_TARGET_TOKENS: 22000,
+        DEFAULT_DEEPSEEK_TARGET_TOKENS: 6000,
+        CHARS_PER_TOKEN_ESTIMATE: 4
     },
     UI: {
         DEFAULT_STATUS_MESSAGE: 'Ready'
@@ -97,7 +111,7 @@ const CONSTANTS = {
 
 // API Key (Replace with secure handling in production)
 // These will be populated from localStorage by loadFromLocalStorage
-let groqApiKey = ''; 
+let grokApiKey = ''; 
 let deepseekApiKey = '';
 
 // Add a global variable for the tokenizer server URL
@@ -123,6 +137,9 @@ Previous Chapter Summary (for continuity, if provided):{previous_chapter_summary
 Previous Chunk Summaries (for context, if provided):{previous_chunk_summaries}
 
 Translator Notes & Special Instructions (if provided, follow strictly):{notes}
+
+Glossary Terms (if provided, strictly adhere to these translations):
+{glossary_terms}
 
 Source Text to Translate:
 
@@ -191,6 +208,7 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
                 updatePricingDisplay();
                 saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.SELECTED_MODEL, modelSelect.value);
                 checkApiKey();
+                updateTokenCountAndCost(); // Call new function
             });
         }
         
@@ -199,7 +217,10 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
         const outputCounterElement = document.getElementById('output-word-count'); // Corrected ID
         
         if (sourceCounterElement && translationBox) {
-            const debouncedUpdateInputWordCount = debounce(() => updateWordCount(translationBox, sourceCounterElement), 250);
+            const debouncedUpdateInputWordCount = debounce(() => {
+                updateWordCount(translationBox, sourceCounterElement);
+                updateTokenCountAndCost(); // Call new function
+            }, 250);
             // updateWordCount(translationBox, sourceCounterElement); // Initial call handled later in DOMContentLoaded after loading storage
             translationBox.addEventListener('input', debouncedUpdateInputWordCount);
         }
@@ -261,6 +282,18 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
         // Load saved prompt templates into dropdown
         loadSavedPromptTemplatesToSelect();
 
+        // Initialize Glossary
+        renderGlossary();
+        if (addGlossaryTermBtn) addGlossaryTermBtn.addEventListener('click', handleAddGlossaryTerm);
+        if (glossaryDisplayArea) glossaryDisplayArea.addEventListener('click', (event) => {
+            if (event.target.classList.contains('delete-glossary-term-btn')) {
+                const termToDelete = event.target.dataset.term;
+                if (termToDelete) {
+                    handleDeleteGlossaryTerm(termToDelete);
+                }
+            }
+        });
+
         // Event listener for the new clear output area button
         if (clearOutputAreaBtn) {
             clearOutputAreaBtn.addEventListener('click', () => {
@@ -310,6 +343,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
+        // Add Glossary placeholder button dynamically if container exists
+        const glossaryPlaceholderBtn = document.createElement('button');
+        glossaryPlaceholderBtn.className = 'placeholder-btn';
+        glossaryPlaceholderBtn.dataset.placeholder = '{glossary_terms}';
+        glossaryPlaceholderBtn.textContent = 'Glossary Terms';
+        placeholderButtonsContainer.appendChild(glossaryPlaceholderBtn);
     }
 });
 
@@ -325,7 +364,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 if (sourceLanguageInput) sourceLanguageInput.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.SOURCE_LANGUAGE, sourceLanguageInput.value));
 if (temperatureSlider) temperatureSlider.addEventListener('input', handleTemperatureChange);
-if (darkModeToggle) darkModeToggle.addEventListener('click', toggleDarkMode);
 if (streamToggle) streamToggle.addEventListener('change', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.STREAM_ENABLED, streamToggle.checked));
 
 if (clearInputBtn) clearInputBtn.addEventListener('click', () => clearSpecificField('translation-box', CONSTANTS.LOCAL_STORAGE_KEYS.TRANSLATION_CONTENT, 'input-word-count'));
@@ -335,6 +373,42 @@ if (clearOutputAreaBtn) clearOutputAreaBtn.addEventListener('click', () => clear
 if (stopBtn) stopBtn.addEventListener('click', stopTranslation);
 
 // --- Functions ---
+
+// Helper function to initialize UI for batch translation
+function initializeBatchTranslationUI(totalChunks) {
+    if (outputBox) {
+        outputBox.innerHTML = ''; // Clear for rich text editor
+    }
+    if (progressIndicatorContainer) {
+        progressIndicatorContainer.innerHTML = `<div>Preparing to translate ${totalChunks} chunks</div>
+                                         <div class="progress-bar-bg" style="height: 10px; background: var(--input-bg); border-radius: 5px; margin-top: 8px; overflow: hidden;">
+                                            <div class="progress-bar-fg" style="width: 0%; height: 100%; background: var(--primary); border-radius: 5px; transition: width 0.3s ease;"></div>
+                                     </div>`;
+    }
+    updateTranslationState(true); // Set initial translating state for the whole batch
+}
+
+// Helper function to update the progress bar UI
+function updateProgressIndicatorUI(currentChunkNumber, totalChunks, isErrorOrStopped = false) {
+    if (progressIndicatorContainer) {
+        const progressPercent = ((currentChunkNumber -1) / totalChunks * 100).toFixed(1);
+        let statusMessageText = `Translating chunk ${currentChunkNumber} of ${totalChunks} (${progressPercent}% complete)`;
+        let barColor = 'var(--primary)';
+
+        if (isErrorOrStopped) {
+            statusMessageText = `Translation stopped at chunk ${currentChunkNumber} of ${totalChunks}`;
+            barColor = 'var(--danger)';
+        } else if (currentChunkNumber > totalChunks) { // Indicates completion
+            statusMessageText = `Translation completed`;
+            barColor = 'var(--success)';
+        }
+
+        progressIndicatorContainer.innerHTML = `<div>${statusMessageText}</div>
+                                         <div class="progress-bar-bg" style="height: 10px; background: var(--input-bg); border-radius: 5px; margin-top: 8px; overflow: hidden;">
+                                            <div class="progress-bar-fg" style="width: ${progressPercent}%; height: 100%; background: ${barColor}; border-radius: 5px; transition: width 0.3s ease;"></div>
+                                     </div>`;
+    }
+}
 
 // Word Counter Functionality
 function updateWordCount(textElement, countElement) {
@@ -376,10 +450,10 @@ function checkApiKey() {
     let keyForSelectedModelMissing = false;
     let missingKeyMessage = '';
 
-    if (selectedModelValue.startsWith(CONSTANTS.MODELS.GROQ_PREFIX)) {
-        if (!groqApiKey || groqApiKey === CONSTANTS.API_KEY_PLACEHOLDERS.GROQ) {
+    if (selectedModelValue.startsWith(CONSTANTS.MODELS.GROK_PREFIX)) {
+        if (!grokApiKey || grokApiKey === CONSTANTS.API_KEY_PLACEHOLDERS.GROK) {
             keyForSelectedModelMissing = true;
-            missingKeyMessage = 'Groq API key is not set or is a placeholder. Translation with Groq models will fail.';
+            missingKeyMessage = 'Grok API key is not set or is a placeholder. Translation with Grok models will fail.';
         }
     } else if (selectedModelValue === CONSTANTS.MODELS.DEEPSEEK_CHAT) {
         if (!deepseekApiKey || deepseekApiKey === CONSTANTS.API_KEY_PLACEHOLDERS.DEEPSEEK) {
@@ -388,7 +462,7 @@ function checkApiKey() {
         }
     } else if (selectedModelValue) { // A model is selected but doesn't match known types that have key checks
         // This case implies a new model might have been added without updating key logic, or it needs no key.
-        // For now, assume it's okay if not Groq or DeepSeek for this specific check.
+        // For now, assume it's okay if not Grok or DeepSeek for this specific check.
         // updateStatus(`API key check not configured for model: ${selectedModelValue}`, CONSTANTS.STATUS_TYPES.INFO);
     }
 
@@ -417,10 +491,10 @@ function checkApiKey() {
     }
 
     // General checks for any unset keys (these provide informational status updates)
-    if (!groqApiKey) {
-        updateStatus('Groq API key is not set. Configure in settings if using Groq models.', CONSTANTS.STATUS_TYPES.INFO, CONSTANTS.TIMEOUTS.STATUS_MESSAGE_DEFAULT + 2000);
-    } else if (groqApiKey === CONSTANTS.API_KEY_PLACEHOLDERS.GROQ) {
-        updateStatus('Groq API key is a placeholder. Please update it in settings.', CONSTANTS.STATUS_TYPES.WARNING, CONSTANTS.TIMEOUTS.STATUS_MESSAGE_DEFAULT + 2000);
+    if (!grokApiKey) {
+        updateStatus('Grok API key is not set. Configure in settings if using Grok models.', CONSTANTS.STATUS_TYPES.INFO, CONSTANTS.TIMEOUTS.STATUS_MESSAGE_DEFAULT + 2000);
+    } else if (grokApiKey === CONSTANTS.API_KEY_PLACEHOLDERS.GROK) {
+        updateStatus('Grok API key is a placeholder. Please update it in settings.', CONSTANTS.STATUS_TYPES.WARNING, CONSTANTS.TIMEOUTS.STATUS_MESSAGE_DEFAULT + 2000);
     }
 
     if (!deepseekApiKey) {
@@ -496,15 +570,15 @@ function handleTemperatureChange() {
     console.log(`[Settings] Temperature changed to: ${tempValue}`);
 }
 
-// Toggle Dark Mode
-function toggleDarkMode() {
-    document.body.classList.toggle('dark-mode');
-    const isDarkMode = document.body.classList.contains('dark-mode');
-    saveToLocalStorage('darkMode', isDarkMode);
-    // Update icon
-    darkModeToggle.innerHTML = isDarkMode ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
-    darkModeToggle.title = isDarkMode ? 'Switch to light mode' : 'Switch to dark mode';
-}
+// Toggle Dark Mode - REMOVED
+// function toggleDarkMode() {
+//     document.body.classList.toggle('dark-mode');
+//     const isDarkMode = document.body.classList.contains('dark-mode');
+//     saveToLocalStorage('darkMode', isDarkMode);
+//     // Update icon
+//     darkModeToggle.innerHTML = isDarkMode ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
+//     darkModeToggle.title = isDarkMode ? 'Switch to light mode' : 'Switch to dark mode';
+// }
 
 // Variables for managing translation state
 let translationInProgress = false;
@@ -562,19 +636,19 @@ function getWordCount(text) {
 // Function to split text into chunks
 async function createTextChunks(text, modelName) {
     console.log(`[Chunker] Creating text chunks for model: ${modelName}`);
-    const DEFAULT_GROK_TOKENS = 22000; // For Grok models
-    const DEFAULT_DEEPSEEK_TOKENS = 6000; // For DeepSeek models
-    let chunks = []; // Ensure chunks is declared here
+    // const DEFAULT_GROK_TOKENS = 22000; // Moved to CONSTANTS
+    // const DEFAULT_DEEPSEEK_TOKENS = 6000; // Moved to CONSTANTS
+    let chunks = []; 
     let usedTokenizerServer = false;
 
     let maxTokens;
 
-    if (modelName.startsWith(CONSTANTS.MODELS.GROQ_PREFIX)) {
-        maxTokens = DEFAULT_GROK_TOKENS;
-        console.log(`[Chunker] Using Grok model, setting max tokens to ${maxTokens}`);
+    if (modelName.startsWith(CONSTANTS.MODELS.GROK_PREFIX)) {
+        maxTokens = CONSTANTS.CHUNKING.DEFAULT_GROK_TARGET_TOKENS;
+        console.log(`[Chunker] Using Grok model, setting max tokens for chunking to ${maxTokens}`);
     } else if (modelName === CONSTANTS.MODELS.DEEPSEEK_CHAT) {
-        maxTokens = DEFAULT_DEEPSEEK_TOKENS;
-        console.log(`[Chunker] Using DeepSeek model, setting max tokens to ${maxTokens}`);
+        maxTokens = CONSTANTS.CHUNKING.DEFAULT_DEEPSEEK_TARGET_TOKENS;
+        console.log(`[Chunker] Using DeepSeek model, setting max tokens for chunking to ${maxTokens}`);
     } else {
         console.error('[Chunker] Unknown model type for chunking:', modelName);
         // For unknown models, return the original text as a single chunk if it's not empty.
@@ -583,55 +657,55 @@ async function createTextChunks(text, modelName) {
     }
 
     if (tokenizerServerUrl) { // Attempt to use server only if URL is configured
-        try {
-            // Attempt to use the tokenizer server for chunking
+    try {
+        // Attempt to use the tokenizer server for chunking
             console.log(`[Chunker] Attempting to use tokenizer server at ${tokenizerServerUrl} with max_tokens: ${maxTokens}`);
-            const healthResponse = await fetch(`${tokenizerServerUrl}/health`, { 
-                method: 'GET' 
-            }).catch(error => {
+        const healthResponse = await fetch(`${tokenizerServerUrl}/health`, { 
+            method: 'GET' 
+        }).catch(error => {
                 console.error('[Chunker] Error connecting to tokenizer server (during health check):', error);
                 throw new Error('Tokenizer server not reachable or health check fetch failed');
-            });
+        });
 
-            if (!healthResponse.ok) {
+        if (!healthResponse.ok) {
                 throw new Error(`Tokenizer server health check failed: ${healthResponse.status} ${await healthResponse.text()}`);
-            }
+        }
 
-            // If server is available, use it for chunking
-            console.log('[Chunker] Tokenizer server is available. Requesting chunking...');
-            const chunkResponse = await fetch(`${tokenizerServerUrl}/chunk`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    text: text,
-                    max_tokens: maxTokens
-                })
-            });
+        // If server is available, use it for chunking
+        console.log('[Chunker] Tokenizer server is available. Requesting chunking...');
+        const chunkResponse = await fetch(`${tokenizerServerUrl}/chunk`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                text: text,
+                max_tokens: maxTokens
+            })
+        });
 
-            if (!chunkResponse.ok) {
-                const errorData = await chunkResponse.json().catch(() => ({ error: 'Server returned non-OK status and failed to parse error JSON.' }));
-                throw new Error(`Server chunking failed: ${chunkResponse.status} - ${errorData.error || 'Unknown server error'}`);
-            }
+        if (!chunkResponse.ok) {
+            const errorData = await chunkResponse.json().catch(() => ({ error: 'Server returned non-OK status and failed to parse error JSON.' }));
+            throw new Error(`Server chunking failed: ${chunkResponse.status} - ${errorData.error || 'Unknown server error'}`);
+    }
 
-            const chunkData = await chunkResponse.json();
+        const chunkData = await chunkResponse.json();
             chunks = chunkData.chunks; // Assign to the function-scoped chunks variable
             usedTokenizerServer = true;
-            
-            console.log("[Chunker] Server response summary:", {
-                chunks_count: chunkData.chunk_count,
-                max_tokens_setting: chunkData.max_tokens_setting,
-                actual_tokens: chunkData.actual_total_tokens_in_chunks
+        
+        console.log("[Chunker] Server response summary:", {
+            chunks_count: chunkData.chunk_count,
+            max_tokens_setting: chunkData.max_tokens_setting,
+            actual_tokens: chunkData.actual_total_tokens_in_chunks
+        });
+        console.log(`[Chunker] Received ${chunks.length} chunks from server`);
+        
+        if (chunks.length > 0) {
+            chunks.forEach((chunk, i) => {
+                console.log(`[Chunker] Chunk ${i+1} preview: ${chunk.substring(0, 50)}... (${chunk.length} chars)`);
             });
-            console.log(`[Chunker] Received ${chunks.length} chunks from server`);
-            
-            if (chunks.length > 0) {
-                chunks.forEach((chunk, i) => {
-                    console.log(`[Chunker] Chunk ${i+1} preview: ${chunk.substring(0, 50)}... (${chunk.length} chars)`);
-                });
-            }
-        } catch (error) {
+        }
+    } catch (error) {
             console.error('[Chunker] Tokenizer server error (URL was configured, or health/chunk call failed):', error.message);
             // usedTokenizerServer remains false, will fall through to character-based chunking.
         }
@@ -642,10 +716,9 @@ async function createTextChunks(text, modelName) {
     if (!usedTokenizerServer) {
         console.warn('[Chunker] Falling back to character-based chunking. This is a rough approximation!');
         
-        // Fallback: Use character-based approximation
-        chunks = []; // Ensure chunks is reset for fallback logic
-        const CHARS_PER_TOKEN_ESTIMATE = 4; // General estimate
-        const maxCharsFallback = maxTokens * CHARS_PER_TOKEN_ESTIMATE;
+        chunks = []; 
+        // const CHARS_PER_TOKEN_ESTIMATE = 4; // Moved to CONSTANTS
+        const maxCharsFallback = maxTokens * CONSTANTS.CHUNKING.CHARS_PER_TOKEN_ESTIMATE;
         let currentChunk = '';
         let accumulatedCharsInCurrentChunk = 0;
 
@@ -779,6 +852,13 @@ async function handleTranslation() {
     const temperature = parseFloat(temperatureSlider.value);
     const enableStream = streamToggle.checked;
     const currentSummary = summaryBox ? summaryBox.value.trim() || CONSTANTS.DEFAULT_VALUES.SUMMARY : CONSTANTS.DEFAULT_VALUES.SUMMARY;
+    const glossary = getGlossary();
+    let formattedGlossary = 'None provided.';
+    if (Object.keys(glossary).length > 0) {
+        formattedGlossary = Object.entries(glossary)
+            .map(([term, translation]) => `${term}: ${translation}`)
+            .join('\n');
+    }
 
     if (!originalSourceText) {
         updateStatus('Please enter text to translate.', CONSTANTS.STATUS_TYPES.WARNING);
@@ -786,21 +866,15 @@ async function handleTranslation() {
         return;
     }
 
-    updateTranslationState(true); // Set initial translating state for the whole batch
+    // updateTranslationState(true); // MOVED to initializeBatchTranslationUI
     console.log(`[Translate] Batch translation starting. Model: ${selectedModel}, Source: ${sourceLanguage}, Target: ${targetLanguage}, Temp: ${temperature}, Streaming: ${enableStream}`);
     
-    // Clear previous output for the new batch
-    if (outputBox) {
-        outputBox.innerHTML = ''; // Clear for rich text editor
-        if (typeof outputBox.value !== 'undefined') outputBox.value = ''; // Clear for textarea fallback
-    }
-    if (progressIndicatorContainer) progressIndicatorContainer.innerHTML = ''; // Clear previous progress
-
-    // Create progress indicator - No longer creating a new element, using the container
-    // const progressIndicator = document.createElement('div');
-    // progressIndicator.className = 'translation-progress';
-    // progressIndicator.style.cssText = 'background: #313244; padding: 10px; margin-bottom: 15px; border-radius: 5px; text-align: center; font-weight: bold;';
-    // outputBox.appendChild(progressIndicator); // No longer appending to outputBox
+    // Clear previous output for the new batch - MOVED to initializeBatchTranslationUI
+    // if (outputBox) {
+    // outputBox.innerHTML = ''; 
+    // if (typeof outputBox.value !== 'undefined') outputBox.value = ''; 
+    // }
+    // if (progressIndicatorContainer) progressIndicatorContainer.innerHTML = ''; 
 
     abortController = new AbortController(); // One controller for the whole batch
     let overallSuccess = true;
@@ -810,21 +884,23 @@ async function handleTranslation() {
         if (textChunks.length === 0) {
             updateStatus('No text to translate after processing.', CONSTANTS.STATUS_TYPES.INFO);
             console.warn('[Translate] No translatable chunks found.');
-            overallSuccess = false; // Or handle as an error if appropriate
-            return; // Exit if no chunks
+            updateTranslationState(false); // Reset UI if no chunks
+            return; 
         }
+        
+        initializeBatchTranslationUI(textChunks.length); // CALL NEW FUNCTION HERE
 
         console.log(`[Translate] Text split into ${textChunks.length} chunks for batch processing.`);
         
-        // Update progress indicator with total chunks
-        if (progressIndicatorContainer) {
-            progressIndicatorContainer.innerHTML = `<div>Preparing to translate ${textChunks.length} chunks</div>
-                                         <div class="progress-bar-bg" style="height: 10px; background: var(--input-bg); border-radius: 5px; margin-top: 8px; overflow: hidden;">
-                                            <div class="progress-bar-fg" style="width: 0%; height: 100%; background: var(--primary); border-radius: 5px; transition: width 0.3s ease;"></div>
-                                         </div>`;
-        }
+        // Update progress indicator with total chunks - MOVED to initializeBatchTranslationUI
+        // if (progressIndicatorContainer) {
+        // progressIndicatorContainer.innerHTML = `<div>Preparing to translate ${textChunks.length} chunks</div>
+        // <div class="progress-bar-bg" style="height: 10px; background: var(--input-bg); border-radius: 5px; margin-top: 8px; overflow: hidden;">
+        // <div class="progress-bar-fg" style="width: 0%; height: 100%; background: var(--primary); border-radius: 5px; transition: width 0.3s ease;"></div>
+        // </div>`;
+        // }
         
-        let chunkSummaries = []; // To store summaries for inter-chunk context (future feature)
+        let chunkSummaries = []; 
         // Check if inter-chunk summaries are enabled
         const interChunkSummaryToggle = document.getElementById('inter-chunk-summary-toggle');
         const enableInterChunkSummaries = interChunkSummaryToggle ? interChunkSummaryToggle.checked : false;
@@ -839,14 +915,7 @@ async function handleTranslation() {
             const chunkTextToTranslate = textChunks[i];
             const chunkNumber = i + 1;
             
-            // Update progress indicator
-            const progressPercent = ((i) / textChunks.length * 100).toFixed(1);
-            if (progressIndicatorContainer) {
-                 progressIndicatorContainer.innerHTML = `<div>Translating chunk ${chunkNumber} of ${textChunks.length} (${progressPercent}% complete)</div>
-                                             <div class="progress-bar-bg" style="height: 10px; background: var(--input-bg); border-radius: 5px; margin-top: 8px; overflow: hidden;">
-                                                <div class="progress-bar-fg" style="width: ${progressPercent}%; height: 100%; background: var(--primary); border-radius: 5px; transition: width 0.3s ease;"></div>
-                                             </div>`;
-            }
+            updateProgressIndicatorUI(chunkNumber, textChunks.length);
             
             updateStatus(`Translating chunk ${chunkNumber} of ${textChunks.length}...`, CONSTANTS.STATUS_TYPES.PROCESSING, 0);
             console.log(`[Translate] Processing chunk ${chunkNumber}/${textChunks.length}. Size: ${chunkTextToTranslate.length} chars.`);
@@ -867,7 +936,8 @@ async function handleTranslation() {
         .replace(/{fandom_context}/g, fandomContext)
         .replace(/{notes}/g, notes)
                 .replace(/{source_text}/g, chunkTextToTranslate) // Use current chunk text
-                .replace(/{previous_chapter_summary}/g, currentSummary); // Summary applies to the whole work
+                .replace(/{previous_chapter_summary}/g, currentSummary) // Summary applies to the whole work
+                .replace(/{glossary_terms}/g, formattedGlossary); // Inject glossary
 
             // Add previous chunk summaries if available (for future inter-chunk summary feature)
             if (chunkSummaries.length > 0 && processedChunkPrompt.includes('{previous_chunk_summaries}')) {
@@ -913,8 +983,8 @@ async function handleTranslation() {
                     streamBuffer += text;
                     clearTimeout(streamUpdateTimer);
                     streamUpdateTimer = setTimeout(flushStreamBuffer, CONSTANTS.TIMEOUTS.STREAM_BUFFER_FLUSH_INTERVAL);
-                };
-            }
+            };
+        }
         
             try {
                 const translation = await getTranslation(processedChunkPrompt, selectedModel, temperature, enableStream, chunkStreamCallback, abortController.signal);
@@ -924,7 +994,7 @@ async function handleTranslation() {
                     clearTimeout(streamUpdateTimer); // Clear any pending timer
                     flushStreamBuffer(); // Flush any remaining content
                 }
-
+        
                 if (abortController.signal.aborted) {
                     overallSuccess = false;
                     break; 
@@ -986,15 +1056,7 @@ async function handleTranslation() {
             }
         } // End of chunks loop
 
-        // Update final progress
-        const finalProgressPercent = overallSuccess && !abortController.signal.aborted ? 100 : ((textChunks.length - 1) / textChunks.length * 100).toFixed(1);
-        if (progressIndicatorContainer) {
-            const barColor = overallSuccess && !abortController.signal.aborted ? 'var(--success)' : 'var(--danger)';
-            progressIndicatorContainer.innerHTML = `<div>Translation ${overallSuccess && !abortController.signal.aborted ? 'completed' : 'stopped'}</div>
-                                         <div class="progress-bar-bg" style="height: 10px; background: var(--input-bg); border-radius: 5px; margin-top: 8px; overflow: hidden;">
-                                            <div class="progress-bar-fg" style="width: ${finalProgressPercent}%; height: 100%; background: ${barColor}; border-radius: 5px; transition: width 0.3s ease;"></div>
-                                         </div>`;
-        }
+        updateProgressIndicatorUI(textChunks.length + 1, textChunks.length, !overallSuccess || (abortController && abortController.signal.aborted) );
 
         if (overallSuccess && !abortController.signal.aborted) {
             updateStatus('All chunks translated successfully!', CONSTANTS.STATUS_TYPES.SUCCESS);
@@ -1031,7 +1093,7 @@ async function handleTranslation() {
                 progressIndicatorContainer.innerHTML = '';
             }
         }, overallSuccess && !abortController.signal.aborted ? 3000 : 0); // Clear after 3s on success, keep if error/stopped or clear immediately if not needed
-
+        
         if (overallSuccess && !abortController.signal.aborted) {
              if (generateSummaryBtn) generateSummaryBtn.disabled = false;
         } else {
@@ -1102,8 +1164,8 @@ ${translatedText}`;
     try {
         // Combine system prompt and user prompt into a single prompt string
         const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
-        // Fix parameter order: prompt, model, temperature, stream, updateCallback
-        const summary = await getTranslation(combinedPrompt, model, temperature, false);
+        // Fix parameter order: prompt, model, temperature, stream, updateCallback, signal
+        const summary = await getTranslation(combinedPrompt, model, temperature, false, null, abortController ? abortController.signal : null);
         summaryBox.value = summary.trim();
         updateStatus('Summary generated.', CONSTANTS.STATUS_TYPES.SUCCESS);
         console.info('[Summary] Summary generation successful.');
@@ -1123,15 +1185,15 @@ function getApiConfig(model, prompt, temperature, stream) {
     let apiKey = '';
     let requestBody = {};
 
-    if (model.startsWith(CONSTANTS.MODELS.GROQ_PREFIX)) {
+    if (model.startsWith(CONSTANTS.MODELS.GROK_PREFIX)) {
         apiUrl = 'https://api.x.ai/v1/chat/completions';
-        apiKey = groqApiKey;
+        apiKey = grokApiKey;
         requestBody = {
             model: model,
             messages: [{ role: "user", content: prompt }],
             temperature: temperature,
             stream: stream,
-            max_tokens: 131072 
+            max_tokens: CONSTANTS.MODELS.DEFAULT_MAX_OUTPUT_TOKENS_GROK 
         };
     } else if (model === CONSTANTS.MODELS.DEEPSEEK_CHAT) {
         apiUrl = 'https://api.deepseek.com/chat/completions';
@@ -1141,7 +1203,7 @@ function getApiConfig(model, prompt, temperature, stream) {
             messages: [{ role: "user", content: prompt }],
             temperature: temperature,
             stream: stream,
-            max_tokens: 8000 // Set max_tokens for DeepSeek
+            max_tokens: CONSTANTS.MODELS.DEFAULT_MAX_OUTPUT_TOKENS_DEEPSEEK 
         };
     } else {
         throw new Error(`Unsupported model selected: ${model}`);
@@ -1229,9 +1291,9 @@ async function getTranslation(prompt, model, temperature, stream = false, update
     const { apiUrl, apiKey, requestBody } = getApiConfig(model, prompt, temperature, stream);
 
     if (!apiKey || 
-        (model.startsWith(CONSTANTS.MODELS.GROQ_PREFIX) && apiKey === CONSTANTS.API_KEY_PLACEHOLDERS.GROQ) || 
+        (model.startsWith(CONSTANTS.MODELS.GROK_PREFIX) && apiKey === CONSTANTS.API_KEY_PLACEHOLDERS.GROK) || 
         (model === CONSTANTS.MODELS.DEEPSEEK_CHAT && apiKey === CONSTANTS.API_KEY_PLACEHOLDERS.DEEPSEEK)) {
-        const specificKeyError = model.startsWith(CONSTANTS.MODELS.GROQ_PREFIX) ? "Groq API key not set." : "DeepSeek API key not set.";
+        const specificKeyError = model.startsWith(CONSTANTS.MODELS.GROK_PREFIX) ? "Grok API key not set." : "DeepSeek API key not set.";
         throw new Error(`API key is not set properly. ${specificKeyError} Please check the API key configuration.`);
     }
 
@@ -1373,7 +1435,7 @@ function handleResetAllApplicationData() {
         }
 
         // Also clear API keys from memory
-        groqApiKey = '';
+        grokApiKey = '';
         deepseekApiKey = '';
 
         // Reload the page to apply defaults and clear state thoroughly
@@ -1492,7 +1554,7 @@ function saveToLocalStorage(key, value) {
     try {
         localStorage.setItem(key, valueToStore);
         // Avoid logging the actual value for potentially large content like promptContent or translationContent
-        if (key === CONSTANTS.LOCAL_STORAGE_KEYS.GROQ_API_KEY || key === CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY) {
+        if (key === CONSTANTS.LOCAL_STORAGE_KEYS.GROK_API_KEY || key === CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY) {
             console.log(`[LocalStorage] Saved ${key}: (API key - value not logged)`);
         } else if (valueToStore && valueToStore.length > 100) { // Heuristic for large content
             console.log(`[LocalStorage] Saved ${key}: (large content - value not logged, length: ${valueToStore.length})`);
@@ -1506,109 +1568,156 @@ function saveToLocalStorage(key, value) {
 }
 
 function loadFromLocalStorage() {
-    console.info('[LocalStorage] Starting to load data from local storage.');
-    document.body.classList.add('dark-mode');
+    try {
+        console.info('[LocalStorage] Starting to load data from local storage.');
+        document.body.classList.add('dark-mode'); // Ensure dark mode is always on
 
-    let loadedGroqKey = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.GROQ_API_KEY) || ''; 
-    let loadedDeepSeekKey = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY) || '';
-    groqApiKey = loadedGroqKey;
-    deepseekApiKey = loadedDeepSeekKey;
-    console.log('[LocalStorage] API Keys loaded (values not displayed).');
+        let loadedGrokKey = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.GROK_API_KEY) || ''; 
+        let loadedDeepSeekKey = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY) || '';
+        grokApiKey = loadedGrokKey;
+        deepseekApiKey = loadedDeepSeekKey;
+        console.log('[LocalStorage] API Keys loaded (values not displayed).');
 
-    // Modal Elements
-    const apiSettingsModal = document.getElementById('api-settings-modal');
-    const apiSettingsBtn = document.getElementById('api-settings-btn');
-    const closeApiModalBtn = document.getElementById('close-api-modal');
-    const saveApiKeysBtn = document.getElementById('save-api-keys');
-    const groqApiKeyInput = document.getElementById('groq-api-key');
-    const deepseekApiKeyInput = document.getElementById('deepseek-api-key');
-    const headerApiBtn = document.getElementById('api-keys-btn');
+        // Modal Elements
+        const apiSettingsModal = document.getElementById('api-settings-modal');
+        const apiSettingsBtn = document.getElementById('api-settings-btn'); // This is likely the one in the old settings card
+        const closeApiModalBtn = document.getElementById('close-api-modal');
+        const saveApiKeysBtn = document.getElementById('save-api-keys');
+        const grokApiKeyInput = document.getElementById('grok-api-key');
+        const deepseekApiKeyInput = document.getElementById('deepseek-api-key');
+        const headerApiBtn = document.getElementById('api-keys-btn'); // This is the button in the main app header
 
-    function initApiModalInternal() {
-        if (groqApiKeyInput) groqApiKeyInput.value = groqApiKey;
-        if (deepseekApiKeyInput) deepseekApiKeyInput.value = deepseekApiKey;
-        
-        const openModalButtons = [];
-        if (apiSettingsBtn) openModalButtons.push(apiSettingsBtn);
-        if (headerApiBtn) openModalButtons.push(headerApiBtn);
+        let focusedElementBeforeModal = null; // To store focus before modal opens
 
-        openModalButtons.forEach(button => {
-            button.addEventListener('click', () => {
-                if (apiSettingsModal) apiSettingsModal.style.display = 'flex';
+        function initApiModalInternal() {
+            if (!apiSettingsModal) return; // Do nothing if modal element doesn't exist
+
+            if (grokApiKeyInput) grokApiKeyInput.value = grokApiKey;
+            if (deepseekApiKeyInput) deepseekApiKeyInput.value = deepseekApiKey;
+            
+            const openModalButtons = [];
+            // Check if these buttons exist before adding listeners
+            if (apiSettingsBtn) openModalButtons.push(apiSettingsBtn); // Button from old settings card location
+            if (headerApiBtn) openModalButtons.push(headerApiBtn);   // Button from top app header
+
+            openModalButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    focusedElementBeforeModal = document.activeElement; // Store focus
+                    apiSettingsModal.style.display = 'flex';
+                    if (grokApiKeyInput) grokApiKeyInput.focus(); // Focus first input
+                });
             });
-        });
-        
-        if (closeApiModalBtn) closeApiModalBtn.addEventListener('click', () => {
-            if (apiSettingsModal) apiSettingsModal.style.display = 'none';
-        });
-        
-        window.addEventListener('click', (e) => {
-            if (apiSettingsModal && e.target === apiSettingsModal) {
+            
+            const closeModal = () => {
                 apiSettingsModal.style.display = 'none';
-            }
-        });
+                if (focusedElementBeforeModal) focusedElementBeforeModal.focus(); // Restore focus
+            };
+
+            if (closeApiModalBtn) closeApiModalBtn.addEventListener('click', closeModal);
+            
+            window.addEventListener('click', (e) => {
+                if (e.target === apiSettingsModal) {
+                    closeModal();
+                }
+            });
+
+            // Basic focus trapping
+            apiSettingsModal.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closeModal();
+                }
+                if (e.key === 'Tab') {
+                    const focusableElements = Array.from(apiSettingsModal.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])'));
+                    const firstElement = focusableElements[0];
+                    const lastElement = focusableElements[focusableElements.length - 1];
+
+                    if (e.shiftKey) { // Shift + Tab
+                        if (document.activeElement === firstElement) {
+                            lastElement.focus();
+                            e.preventDefault();
+                        }
+                    } else { // Tab
+                        if (document.activeElement === lastElement) {
+                            firstElement.focus();
+                            e.preventDefault();
+                        }
+                    }
+                }
+            });
+            
+            if (saveApiKeysBtn) saveApiKeysBtn.addEventListener('click', () => {
+                let currentGrokKey = grokApiKeyInput ? grokApiKeyInput.value.trim() : '';
+                let currentDeepSeekKey = deepseekApiKeyInput ? deepseekApiKeyInput.value.trim() : '';
+                
+                localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.GROK_API_KEY, currentGrokKey);
+                localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY, currentDeepSeekKey);
+                grokApiKey = currentGrokKey;
+                deepseekApiKey = currentDeepSeekKey;
+                
+                if (apiSettingsModal) apiSettingsModal.style.display = 'none';
+                updateStatus('API keys saved successfully', CONSTANTS.STATUS_TYPES.SUCCESS);
+                console.log('[APIKeys] API keys saved via modal.');
+                checkApiKey(); 
+            });
+        }
+
+        if (apiSettingsModal) { // Only initialize if the modal itself exists
+            initApiModalInternal();
+        }
+
+        if (grokApiKeyInput) grokApiKeyInput.value = grokApiKey;
+        if (deepseekApiKeyInput) deepseekApiKeyInput.value = deepseekApiKey;
+
+        if (translationBox) translationBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.TRANSLATION_CONTENT) || '';
+        if (promptBox) promptBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT) || defaultPromptTemplate;
+        if (notesBox) notesBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.NOTES_CONTENT) || '';
+        if (fandomBox) fandomBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT) || '';
         
-        if (saveApiKeysBtn) saveApiKeysBtn.addEventListener('click', () => {
-            let currentGroqKey = groqApiKeyInput ? groqApiKeyInput.value.trim() : '';
-            let currentDeepSeekKey = deepseekApiKeyInput ? deepseekApiKeyInput.value.trim() : '';
-            
-            localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.GROQ_API_KEY, currentGroqKey);
-            localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY, currentDeepSeekKey);
-            groqApiKey = currentGroqKey;
-            deepseekApiKey = currentDeepSeekKey;
-            
-            if (apiSettingsModal) apiSettingsModal.style.display = 'none';
-            updateStatus('API keys saved successfully', CONSTANTS.STATUS_TYPES.SUCCESS);
-            console.log('[APIKeys] API keys saved via modal.');
-            checkApiKey(); 
-        });
-    }
+        const savedOutput = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.OUTPUT_CONTENT) || '';
+        if (outputBox) outputBox.innerHTML = savedOutput || '';
 
-    if (apiSettingsModal) { // Only initialize if the modal itself exists
-        initApiModalInternal();
-    }
+        const savedStream = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.STREAM_ENABLED);
+        if (streamToggle) streamToggle.checked = savedStream === 'true';
 
-    if (groqApiKeyInput) groqApiKeyInput.value = groqApiKey;
-    if (deepseekApiKeyInput) deepseekApiKeyInput.value = deepseekApiKey;
+        const savedModel = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.SELECTED_MODEL);
+        if (modelSelect && savedModel) modelSelect.value = savedModel;
 
-    if (translationBox) translationBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.TRANSLATION_CONTENT) || '';
-    if (promptBox) promptBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT) || defaultPromptTemplate;
-    if (notesBox) notesBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.NOTES_CONTENT) || '';
-    if (fandomBox) fandomBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT) || '';
-    
-    const savedOutput = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.OUTPUT_CONTENT) || '';
-    if (outputBox) outputBox.innerHTML = savedOutput || '';
+        const savedInterChunkSummaryEnabled = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.INTER_CHUNK_SUMMARY_ENABLED);
+        const interChunkSummaryToggle = document.getElementById('inter-chunk-summary-toggle');
+        if (interChunkSummaryToggle) interChunkSummaryToggle.checked = savedInterChunkSummaryEnabled === 'true'; // Default to false if not found
 
-    const savedStream = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.STREAM_ENABLED);
-    if (streamToggle) streamToggle.checked = savedStream === 'true';
+        const savedSourceLang = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.SOURCE_LANGUAGE);
+        if (sourceLanguageInput) {
+            sourceLanguageInput.value = savedSourceLang || CONSTANTS.DEFAULT_VALUES.SOURCE_LANGUAGE;
+        }
 
-    const savedModel = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.SELECTED_MODEL);
-    if (modelSelect && savedModel) modelSelect.value = savedModel;
-
-    const savedInterChunkSummaryEnabled = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.INTER_CHUNK_SUMMARY_ENABLED);
-    const interChunkSummaryToggle = document.getElementById('inter-chunk-summary-toggle');
-    if (interChunkSummaryToggle) interChunkSummaryToggle.checked = savedInterChunkSummaryEnabled === 'true'; // Default to false if not found
-
-    const savedSourceLang = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.SOURCE_LANGUAGE);
-    if (sourceLanguageInput) {
-        sourceLanguageInput.value = savedSourceLang || CONSTANTS.DEFAULT_VALUES.SOURCE_LANGUAGE;
-    }
-
-    const savedTemperature = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.TEMPERATURE);
-    if (temperatureSlider) {
-        temperatureSlider.value = savedTemperature || CONSTANTS.DEFAULT_VALUES.TEMPERATURE;
-    }
-    handleTemperatureChange(); // This will also log the temperature change
-    updatePricingDisplay();
-    console.info('[LocalStorage] Finished loading data from local storage.');
-    updateStatus('Loaded previous session from local storage.', CONSTANTS.STATUS_TYPES.INFO, CONSTANTS.TIMEOUTS.STATUS_LOADED_SESSION);
-    
-    // Initial word counts after loading from local storage
-    if (translationBox && document.getElementById('input-word-count')) {
-        updateWordCount(translationBox, document.getElementById('input-word-count'));
-    }
-    if (outputBox && document.getElementById('output-word-count')) {
-        updateWordCount(outputBox, document.getElementById('output-word-count'));
+        const savedTemperature = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.TEMPERATURE);
+        if (temperatureSlider) {
+            temperatureSlider.value = savedTemperature || CONSTANTS.DEFAULT_VALUES.TEMPERATURE;
+        }
+        handleTemperatureChange(); // This will also log the temperature change
+        updatePricingDisplay();
+        renderGlossary(); // Render glossary on load
+        console.info('[LocalStorage] Finished loading data from local storage.');
+        updateStatus('Loaded previous session from local storage.', CONSTANTS.STATUS_TYPES.INFO, CONSTANTS.TIMEOUTS.STATUS_LOADED_SESSION);
+        
+        // Initial word counts after loading from local storage
+        if (translationBox && document.getElementById('input-word-count')) {
+            updateWordCount(translationBox, document.getElementById('input-word-count'));
+        }
+        if (outputBox && document.getElementById('output-word-count')) {
+            updateWordCount(outputBox, document.getElementById('output-word-count'));
+        }
+        updateTokenCountAndCost(); // Initial call on load
+    } catch (error) {
+        console.error("[LocalStorage] Error during loadFromLocalStorage:", error);
+        updateStatus("Could not load settings from local storage. It might be disabled or inaccessible.", CONSTANTS.STATUS_TYPES.ERROR, 0);
+        // Apply critical defaults if local storage fails catastrophically
+        if (promptBox) promptBox.value = defaultPromptTemplate;
+        if (modelSelect) modelSelect.value = 'grok-3-latest'; // A sensible default model
+        handleTemperatureChange(); // To set default temp display
+        updatePricingDisplay();
+        document.body.classList.add('dark-mode'); // Ensure dark mode anyway
     }
 }
 
@@ -1857,3 +1966,194 @@ if (interChunkSummaryToggleElement) {
         saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.INTER_CHUNK_SUMMARY_ENABLED, interChunkSummaryToggleElement.checked);
     });
 }
+
+// --- Glossary Management Functions ---
+function getGlossary() {
+    const glossaryJson = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_TERMS);
+    return glossaryJson ? JSON.parse(glossaryJson) : {};
+}
+
+function saveGlossary(glossary) {
+    localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_TERMS, JSON.stringify(glossary));
+}
+
+function renderGlossary() {
+    if (!glossaryDisplayArea || !noGlossaryTermsMsg) return;
+    const glossary = getGlossary();
+    glossaryDisplayArea.innerHTML = ''; // Clear previous terms
+
+    if (Object.keys(glossary).length === 0) {
+        noGlossaryTermsMsg.style.display = 'block';
+        glossaryDisplayArea.appendChild(noGlossaryTermsMsg); // Re-append if it was cleared
+    } else {
+        noGlossaryTermsMsg.style.display = 'none';
+        const ul = document.createElement('ul');
+        ul.className = 'glossary-items-list'; // For potential styling
+        for (const term in glossary) {
+            if (glossary.hasOwnProperty(term)) {
+                const li = document.createElement('li');
+                li.className = 'glossary-item';
+                
+                const termSpan = document.createElement('span');
+                termSpan.className = 'glossary-term-source-text';
+                termSpan.textContent = term;
+                
+                const translationSpan = document.createElement('span');
+                translationSpan.className = 'glossary-term-target-text';
+                translationSpan.textContent = glossary[term];
+                
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-glossary-term-btn action-btn danger-btn'; // Reusing existing button styles
+                deleteBtn.innerHTML = '<i class="fas fa-trash-alt"></i>';
+                deleteBtn.dataset.term = term;
+                deleteBtn.title = 'Delete term';
+
+                li.appendChild(termSpan);
+                li.appendChild(document.createTextNode(' → '));
+                li.appendChild(translationSpan);
+                li.appendChild(deleteBtn);
+                ul.appendChild(li);
+            }
+        }
+        glossaryDisplayArea.appendChild(ul);
+    }
+}
+
+function handleAddGlossaryTerm() {
+    if (!glossaryTermSourceInput || !glossaryTermTargetInput) return;
+    const sourceTerm = glossaryTermSourceInput.value.trim();
+    const targetTranslation = glossaryTermTargetInput.value.trim();
+
+    if (!sourceTerm) {
+        updateStatus('Source term cannot be empty.', CONSTANTS.STATUS_TYPES.WARNING);
+        glossaryTermSourceInput.focus();
+        return;
+    }
+    if (!targetTranslation) {
+        updateStatus('Target translation cannot be empty.', CONSTANTS.STATUS_TYPES.WARNING);
+        glossaryTermTargetInput.focus();
+        return;
+    }
+
+    const glossary = getGlossary();
+    if (glossary[sourceTerm] && glossary[sourceTerm] !== targetTranslation) {
+        if (!confirm(`The term "${sourceTerm}" already exists with translation "${glossary[sourceTerm]}". Overwrite with "${targetTranslation}"?`)) {
+            return;
+        }
+    }
+
+    glossary[sourceTerm] = targetTranslation;
+    saveGlossary(glossary);
+    renderGlossary();
+    updateStatus(`Glossary term "${sourceTerm}" added/updated.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+    glossaryTermSourceInput.value = '';
+    glossaryTermTargetInput.value = '';
+    glossaryTermSourceInput.focus();
+}
+
+function handleDeleteGlossaryTerm(termToDelete) {
+    if (!confirm(`Are you sure you want to delete the glossary term "${termToDelete}"?`)) {
+        return;
+    }
+    const glossary = getGlossary();
+    if (glossary.hasOwnProperty(termToDelete)) {
+        delete glossary[termToDelete];
+        saveGlossary(glossary);
+        renderGlossary();
+        updateStatus(`Glossary term "${termToDelete}" deleted.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+    } else {
+        updateStatus(`Error: Term "${termToDelete}" not found in glossary.`, CONSTANTS.STATUS_TYPES.ERROR);
+    }
+}
+// --- End of Glossary Management Functions ---
+
+// --- Token Count and Cost Estimation Functions ---
+async function updateTokenCountAndCost() {
+    if (!translationBox || !modelSelect || !inputTokenCountEl || !inputCostEstimateEl) {
+        if (inputTokenCountEl) inputTokenCountEl.textContent = 'Estimated Tokens: N/A';
+        if (inputCostEstimateEl) inputCostEstimateEl.textContent = 'Estimated Cost: N/A';
+        return;
+    }
+
+    const text = translationBox.value.trim();
+    const selectedModel = modelSelect.value;
+    let tokenCount = 0;
+    let countSource = 'client-side estimate';
+
+    if (!text) {
+        inputTokenCountEl.textContent = 'Estimated Tokens: 0';
+        inputCostEstimateEl.textContent = 'Estimated Cost: $0.00';
+        return;
+    }
+
+    // TODO: Implement tokenizer server call here when server endpoint is ready
+    if (tokenizerServerUrl) {
+        try {
+            console.log(`[Tokenizer] Fetching token count from server for ${text.length} chars.`);
+            const response = await fetch(`${tokenizerServerUrl}/tokenize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data && typeof data.token_count === 'number') {
+                    tokenCount = data.token_count;
+                    countSource = 'server';
+                } else {
+                    console.warn('[Tokenizer] Server response missing token_count.');
+                    // Fallback to client-side if server response is malformed
+                    countSource = 'client-side estimate (server error)'; 
+                }
+            } else {
+                console.warn(`[Tokenizer] Server error: ${response.status}`);
+                 // Fallback to client-side if server returns an error
+                countSource = 'client-side estimate (server unavailable)';
+            }
+        } catch (error) {
+            console.error('[Tokenizer] Error calling tokenizer server:', error);
+            // Fallback to client-side if fetch fails
+            countSource = 'client-side estimate (fetch error)';
+        }
+    }
+
+    if (countSource.startsWith('client-side estimate')) { // If server call failed/skipped, or resulted in fallback
+        const words = text.split(/\s+/).filter(Boolean).length;
+        if (selectedModel.startsWith(CONSTANTS.MODELS.GROK_PREFIX) || selectedModel === CONSTANTS.MODELS.DEEPSEEK_CHAT) {
+            tokenCount = Math.ceil(words * 1.35); // General heuristic for English-like text
+            if (text.match(/[\u4E00-\u9FFF]/)) { // If CJK characters are present
+                tokenCount = Math.ceil(text.length * 0.8); // CJK often closer to 1 char = 1 token, but can be more complex
+            }
+        } else {
+            tokenCount = Math.ceil(text.length / 3); // Generic fallback for unknown models
+        }
+        // countSource is already 'client-side estimate' by default or set in catch blocks
+    }
+
+    inputTokenCountEl.textContent = `Estimated Tokens: ${tokenCount.toLocaleString()} (${countSource})`;
+
+    // Cost Estimation
+    if (modelPricing[selectedModel] && modelPricing[selectedModel].input) {
+        const inputPriceString = modelPricing[selectedModel].input.replace('$', '');
+        const inputPricePerMillion = parseFloat(inputPriceString);
+        if (!isNaN(inputPricePerMillion)) {
+            const cost = (tokenCount / 1000000) * inputPricePerMillion;
+            let formattedCost;
+            if (cost === 0) {
+                formattedCost = '$0.00';
+            } else if (cost < 0.0001 && cost > 0) { // e.g. $0.00005
+                formattedCost = '~$0.0001 <'; // Indicate it's very small but positive
+            } else if (cost < 0.01) { // e.g. $0.005 -> $0.0050
+                formattedCost = `~$${cost.toFixed(4)}`;
+            } else { // e.g. $0.015 -> $0.02
+                formattedCost = `~$${cost.toFixed(2)}`;
+            }
+            inputCostEstimateEl.textContent = `Estimated Cost: ${formattedCost}`;
+        } else {
+            inputCostEstimateEl.textContent = 'Estimated Cost: N/A (parse error)';
+        }
+    } else {
+        inputCostEstimateEl.textContent = 'Estimated Cost: N/A (pricing unavailable)';
+    }
+}
+// --- End of Token Count and Cost Estimation Functions ---
