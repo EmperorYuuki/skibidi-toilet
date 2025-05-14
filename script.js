@@ -64,7 +64,8 @@ const CONSTANTS = {
         SOURCE_LANGUAGE: 'Japanese',
         TEMPERATURE: 0.7,
         STREAM_ENABLED: false, // Default for stream toggle if not in localStorage
-        INTER_CHUNK_SUMMARY_ENABLED: false // Default for inter-chunk summary toggle
+        INTER_CHUNK_SUMMARY_ENABLED: false, // Default for inter-chunk summary toggle
+        PROJECT_NAME: 'Untitled Project' // Default project name
     },
     TIMEOUTS: {
         AUTO_SAVE_DEBOUNCE: 1500,
@@ -87,8 +88,14 @@ const CONSTANTS = {
         SAVED_PROMPTS: 'fanficTranslatorSavedPrompts',
         INTER_CHUNK_SUMMARY_ENABLED: 'interChunkSummaryEnabled', // New key
         GLOSSARY_TERMS: 'fanficTranslatorGlossary', // Key for glossary
-        GLOSSARY_REPLACE_TOGGLE: 'fanficTranslatorGlossaryReplaceToggle' // New key for the toggle
+        GLOSSARY_REPLACE_TOGGLE: 'fanficTranslatorGlossaryReplaceToggle', // New key for the toggle
+        TARGET_LANGUAGE: 'fanficTranslatorTargetLanguage' // New key for target language
         // DARK_MODE: 'darkMode' // Not actively used for setting, but was a key
+    },
+    PROJECT_STORAGE: {
+        ACTIVE_PROJECT_ID: 'fanficTranslatorActiveProject',
+        PROJECT_LIST: 'fanficTranslatorProjects',
+        GLOBAL_KEYS: ['grokApiKey', 'deepseekApiKey'] // Keys that are not project-specific
     },
     API_KEY_PLACEHOLDERS: {
         GROK: 'YOUR_GROK_API_KEY',
@@ -156,6 +163,846 @@ Source Text to Analyze:
     }
 };
 
+// ProjectManager Module
+const ProjectManager = {
+    activeProjectId: null,
+    projectList: [],
+    
+    // Initialize the project system
+    init() {
+        this.loadProjectList();
+        this.ensureActiveProject();
+        this.renderProjectSidebar();
+        this.initProjectSettingsModal();
+        this.initProjectEvents();
+    },
+    
+    // Load project list from localStorage
+    loadProjectList() {
+        try {
+            const projectListJson = localStorage.getItem(CONSTANTS.PROJECT_STORAGE.PROJECT_LIST);
+            this.projectList = projectListJson ? JSON.parse(projectListJson) : [];
+            console.log('[Projects] Loaded project list:', this.projectList);
+        } catch (error) {
+            console.error('[Projects] Error loading project list:', error);
+            this.projectList = [];
+        }
+    },
+    
+    // Make sure we have at least one project and a valid active project
+    ensureActiveProject() {
+        // Create default project if none exist
+        if (this.projectList.length === 0) {
+            console.log('[Projects] No projects found, creating default project');
+            const defaultId = this.generateProjectId();
+            this.projectList.push({
+                id: defaultId,
+                name: CONSTANTS.DEFAULT_VALUES.PROJECT_NAME,
+                created: Date.now(),
+                lastModified: Date.now()
+            });
+            this.saveProjectList();
+            
+            // Set as active project
+            this.activeProjectId = defaultId;
+            this.saveActiveProjectId();
+            
+            // Migrate existing data to this project
+            this.migrateGlobalToProject(defaultId);
+        } else {
+            // Load the active project ID
+            const storedActiveId = localStorage.getItem(CONSTANTS.PROJECT_STORAGE.ACTIVE_PROJECT_ID);
+            
+            // Check if the stored active ID is valid
+            if (storedActiveId && this.projectList.some(p => p.id === storedActiveId)) {
+                this.activeProjectId = storedActiveId;
+            } else {
+                // Default to first project if active ID is invalid
+                this.activeProjectId = this.projectList[0].id;
+                this.saveActiveProjectId();
+            }
+        }
+        
+        // Update the UI to show the active project
+        this.updateActiveProjectUI();
+    },
+    
+    // Generate a unique project ID
+    generateProjectId() {
+        return `project_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    },
+    
+    // Save the project list to localStorage
+    saveProjectList() {
+        localStorage.setItem(CONSTANTS.PROJECT_STORAGE.PROJECT_LIST, JSON.stringify(this.projectList));
+    },
+    
+    // Save the active project ID to localStorage
+    saveActiveProjectId() {
+        localStorage.setItem(CONSTANTS.PROJECT_STORAGE.ACTIVE_PROJECT_ID, this.activeProjectId);
+    },
+    
+    // Get a project-scoped key
+    getScopedKey(key) {
+        // Check if this is a global key (not project-scoped)
+        if (CONSTANTS.PROJECT_STORAGE.GLOBAL_KEYS.includes(key)) {
+            return key;
+        }
+        return `${this.activeProjectId}_${key}`;
+    },
+    
+    // Migrate existing global data to a project
+    migrateGlobalToProject(projectId) {
+        console.log(`[Projects] Migrating global data to project ${projectId}`);
+        
+        // Temporarily remember the active project ID
+        const originalActiveId = this.activeProjectId;
+        this.activeProjectId = projectId;
+        
+        // Get all localStorage keys
+        const allKeys = Object.keys(localStorage);
+        
+        // For each key that corresponds to a CONSTANTS.LOCAL_STORAGE_KEYS value
+        // and is not a global key, copy it to a project-scoped key
+        Object.values(CONSTANTS.LOCAL_STORAGE_KEYS).forEach(key => {
+            if (!CONSTANTS.PROJECT_STORAGE.GLOBAL_KEYS.includes(key) && allKeys.includes(key)) {
+                const value = localStorage.getItem(key);
+                if (value !== null) {
+                    const scopedKey = this.getScopedKey(key);
+                    
+                    // Don't overwrite existing project data
+                    if (!localStorage.getItem(scopedKey)) {
+                        localStorage.setItem(scopedKey, value);
+                        console.log(`[Projects] Migrated ${key} to ${scopedKey}`);
+                    } else {
+                        console.log(`[Projects] Skipped migration for ${key}: project already has data at ${scopedKey}`);
+                    }
+                }
+            }
+        });
+        
+        // Restore the original active project ID
+        this.activeProjectId = originalActiveId;
+    },
+    
+    // Create a new project
+    createProject(name) {
+        const projectId = this.generateProjectId();
+        const newProject = {
+            id: projectId,
+            name: name || CONSTANTS.DEFAULT_VALUES.PROJECT_NAME,
+            created: Date.now(),
+            lastModified: Date.now()
+        };
+        
+        this.projectList.push(newProject);
+        this.saveProjectList();
+        
+        console.log(`[Projects] Created new project: ${newProject.name} (${projectId})`);
+        return projectId;
+    },
+    
+    // Switch to a different project
+    switchProject(projectId) {
+        // Ensure the project exists
+        const projectExists = this.projectList.some(p => p.id === projectId);
+        if (!projectExists) {
+            console.error(`[Projects] Cannot switch to non-existent project: ${projectId}`);
+            updateStatus('Error: Project not found', CONSTANTS.STATUS_TYPES.ERROR);
+            return false;
+        }
+        
+        // No need to switch if already active
+        if (projectId === this.activeProjectId) {
+            return true;
+        }
+        
+        console.log(`[Projects] Switching from project ${this.activeProjectId} to ${projectId}`);
+        
+        try {
+            // Save current project state
+            this.saveCurrentProjectState();
+            
+            // Update active project ID
+            this.activeProjectId = projectId;
+            this.saveActiveProjectId();
+            
+            // Update last modified timestamp
+            this.updateProjectLastModified(projectId);
+            
+            // Load the new project data
+            loadFromLocalStorage();
+            
+            // Update UI
+            this.updateActiveProjectUI();
+            this.renderProjectSidebar();
+            
+            // Show success message
+            const project = this.projectList.find(p => p.id === projectId);
+            if (project) {
+                updateStatus(`Switched to project: ${project.name}`, CONSTANTS.STATUS_TYPES.SUCCESS);
+            }
+            
+            return true;
+        } catch (error) {
+            console.error(`[Projects] Error switching to project ${projectId}:`, error);
+            updateStatus('Error switching projects', CONSTANTS.STATUS_TYPES.ERROR);
+            return false;
+        }
+    },
+    
+    // Save the current project state to avoid data loss when switching
+    saveCurrentProjectState() {
+        if (!this.activeProjectId) return;
+        
+        try {
+            // Save all visible fields that might have unsaved changes
+            const fieldsToSave = [
+                { element: translationBox, key: CONSTANTS.LOCAL_STORAGE_KEYS.TRANSLATION_CONTENT },
+                { element: promptBox, key: CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT },
+                { element: notesBox, key: CONSTANTS.LOCAL_STORAGE_KEYS.NOTES_CONTENT },
+                { element: fandomBox, key: CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT },
+                { element: outputBox, key: CONSTANTS.LOCAL_STORAGE_KEYS.OUTPUT_CONTENT, isHTML: true }
+            ];
+            
+            fieldsToSave.forEach(field => {
+                if (field.element) {
+                    const value = field.isHTML ? field.element.innerHTML : field.element.value;
+                    saveToLocalStorage(field.key, value);
+                }
+            });
+            
+            // Save other state
+            if (streamToggle) saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.STREAM_ENABLED, streamToggle.checked);
+            if (modelSelect) saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.SELECTED_MODEL, modelSelect.value);
+            if (sourceLanguageInput) saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.SOURCE_LANGUAGE, sourceLanguageInput.value);
+            if (targetLanguageInput) saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.TARGET_LANGUAGE, targetLanguageInput.value);
+            if (temperatureSlider) saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.TEMPERATURE, temperatureSlider.value);
+            
+            const interChunkSummaryToggle = document.getElementById('inter-chunk-summary-toggle');
+            if (interChunkSummaryToggle) {
+                saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.INTER_CHUNK_SUMMARY_ENABLED, interChunkSummaryToggle.checked);
+            }
+            
+            const glossaryReplaceToggle = document.getElementById('glossary-replace-toggle');
+            if (glossaryReplaceToggle) {
+                saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_REPLACE_TOGGLE, glossaryReplaceToggle.checked);
+            }
+            
+            console.log(`[Projects] Saved current state for project ${this.activeProjectId}`);
+        } catch (error) {
+            console.error('[Projects] Error saving current project state:', error);
+        }
+    },
+    
+    // Delete a project
+    deleteProject(projectId) {
+        // Don't allow deleting the last project
+        if (this.projectList.length <= 1) {
+            updateStatus('Cannot delete the only project', CONSTANTS.STATUS_TYPES.WARNING);
+            return false;
+        }
+        
+        // Find the project name for the status message
+        const project = this.projectList.find(p => p.id === projectId);
+        const projectName = project ? project.name : 'Unknown Project';
+        
+        // Remove from project list
+        this.projectList = this.projectList.filter(p => p.id !== projectId);
+        this.saveProjectList();
+        
+        // Clear all localStorage keys for this project
+        this.clearProjectData(projectId);
+        
+        // If we deleted the active project, switch to another one
+        if (this.activeProjectId === projectId) {
+            // Switch to the first available project
+            this.activeProjectId = this.projectList[0].id;
+            this.saveActiveProjectId();
+            
+            // Load the new project data
+            loadFromLocalStorage();
+            
+            // Update UI
+            this.updateActiveProjectUI();
+        }
+        
+        // Update the project sidebar
+        this.renderProjectSidebar();
+        
+        updateStatus(`Deleted project: ${projectName}`, CONSTANTS.STATUS_TYPES.SUCCESS);
+        return true;
+    },
+    
+    // Clear all localStorage data for a specific project
+    clearProjectData(projectId) {
+        // Get all localStorage keys
+        const allKeys = Object.keys(localStorage);
+        
+        // Remove all keys that start with the project ID
+        const prefix = `${projectId}_`;
+        allKeys.forEach(key => {
+            if (key.startsWith(prefix)) {
+                localStorage.removeItem(key);
+                console.log(`[Projects] Removed ${key} from localStorage`);
+            }
+        });
+    },
+    
+    // Rename a project
+    renameProject(projectId, newName) {
+        const projectIndex = this.projectList.findIndex(p => p.id === projectId);
+        if (projectIndex === -1) {
+            return false;
+        }
+        
+        const oldName = this.projectList[projectIndex].name;
+        this.projectList[projectIndex].name = newName || CONSTANTS.DEFAULT_VALUES.PROJECT_NAME;
+        this.projectList[projectIndex].lastModified = Date.now();
+        this.saveProjectList();
+        
+        // Update UI if this is the active project
+        if (projectId === this.activeProjectId) {
+            this.updateActiveProjectUI();
+        }
+        
+        // Update project sidebar
+        this.renderProjectSidebar();
+        
+        updateStatus(`Renamed project from "${oldName}" to "${newName}"`, CONSTANTS.STATUS_TYPES.SUCCESS);
+        return true;
+    },
+    
+    // Update the lastModified timestamp for a project
+    updateProjectLastModified(projectId) {
+        const projectIndex = this.projectList.findIndex(p => p.id === projectId);
+        if (projectIndex !== -1) {
+            this.projectList[projectIndex].lastModified = Date.now();
+            this.saveProjectList();
+        }
+    },
+    
+    // Update the UI to reflect the active project
+    updateActiveProjectUI() {
+        const project = this.projectList.find(p => p.id === this.activeProjectId);
+        if (!project) return;
+        
+        // Update project name display
+        const projectNameElement = document.getElementById('active-project-name');
+        if (projectNameElement) {
+            projectNameElement.textContent = project.name;
+        }
+    },
+    
+    // Render the project sidebar
+    renderProjectSidebar() {
+        const projectList = document.getElementById('project-list');
+        if (!projectList) return;
+        
+        // Clear existing content
+        projectList.innerHTML = '';
+        
+        // Sort projects by lastModified (most recent first)
+        const sortedProjects = [...this.projectList].sort((a, b) => b.lastModified - a.lastModified);
+        
+        // Add each project to the sidebar
+        sortedProjects.forEach(project => {
+            const projectItem = document.createElement('div');
+            projectItem.className = `project-item ${project.id === this.activeProjectId ? 'active' : ''}`;
+            projectItem.dataset.projectId = project.id;
+            
+            // Project name area (main clickable area)
+            const nameArea = document.createElement('div');
+            nameArea.className = 'project-name-area';
+            nameArea.textContent = project.name;
+            
+            // Project actions (rename, delete)
+            const actions = document.createElement('div');
+            actions.className = 'project-actions';
+            
+            // Rename button
+            const renameBtn = document.createElement('button');
+            renameBtn.className = 'project-action';
+            renameBtn.innerHTML = '<i class="fas fa-edit"></i>';
+            renameBtn.title = 'Rename project';
+            renameBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent clicking the parent
+                this.handleRenameProject(project.id);
+            });
+            
+            // Delete button
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'project-action';
+            deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+            deleteBtn.title = 'Delete project';
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent clicking the parent
+                this.handleDeleteProject(project.id);
+            });
+            
+            // Add buttons to actions
+            actions.appendChild(renameBtn);
+            actions.appendChild(deleteBtn);
+            
+            // Add all elements to project item
+            projectItem.appendChild(nameArea);
+            projectItem.appendChild(actions);
+            
+            // Add click handler to switch projects
+            projectItem.addEventListener('click', () => {
+                this.switchProject(project.id);
+            });
+            
+            // Add to project list
+            projectList.appendChild(projectItem);
+        });
+    },
+    
+    // Initialize project settings modal
+    initProjectSettingsModal() {
+        const projectSettingsModal = document.getElementById('project-settings-modal');
+        const projectSettingsBtn = document.getElementById('project-settings-btn');
+        const closeProjectModalBtn = document.getElementById('close-project-modal');
+        const saveProjectSettingsBtn = document.getElementById('save-project-settings');
+        const projectNameInput = document.getElementById('project-name-input');
+        const deleteCurrentProjectBtn = document.getElementById('delete-current-project-btn');
+        const exportProjectBtn = document.getElementById('export-project-btn');
+        const importProjectBtn = document.getElementById('import-project-btn');
+        
+        if (!projectSettingsModal || !projectSettingsBtn) return;
+        
+        let focusedElementBeforeModal = null;
+        
+        // Open modal
+        projectSettingsBtn.addEventListener('click', () => {
+            focusedElementBeforeModal = document.activeElement;
+            
+            // Populate input with current project name
+            if (projectNameInput) {
+                const project = this.projectList.find(p => p.id === this.activeProjectId);
+                if (project) {
+                    projectNameInput.value = project.name;
+                }
+            }
+            
+            projectSettingsModal.style.display = 'flex';
+            if (projectNameInput) projectNameInput.focus();
+        });
+        
+        // Close modal
+        const closeModal = () => {
+            projectSettingsModal.style.display = 'none';
+            if (focusedElementBeforeModal) focusedElementBeforeModal.focus();
+        };
+        
+        if (closeProjectModalBtn) {
+            closeProjectModalBtn.addEventListener('click', closeModal);
+        }
+        
+        // Close modal when clicking outside
+        window.addEventListener('click', (e) => {
+            if (e.target === projectSettingsModal) {
+                closeModal();
+            }
+        });
+        
+        // Save project settings
+        if (saveProjectSettingsBtn && projectNameInput) {
+            saveProjectSettingsBtn.addEventListener('click', () => {
+                const newName = projectNameInput.value.trim();
+                if (newName) {
+                    this.renameProject(this.activeProjectId, newName);
+                    closeModal();
+                } else {
+                    updateStatus('Project name cannot be empty', CONSTANTS.STATUS_TYPES.WARNING);
+                }
+            });
+        }
+        
+        // Delete current project
+        if (deleteCurrentProjectBtn) {
+            deleteCurrentProjectBtn.addEventListener('click', () => {
+                this.handleDeleteProject(this.activeProjectId);
+                closeModal();
+            });
+        }
+        
+        // Export project
+        if (exportProjectBtn) {
+            exportProjectBtn.addEventListener('click', () => {
+                this.exportProject(this.activeProjectId);
+                closeModal();
+            });
+        }
+        
+        // Import project
+        if (importProjectBtn) {
+            // Create a hidden file input
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.json';
+            fileInput.style.display = 'none';
+            fileInput.id = 'project-import-file';
+            document.body.appendChild(fileInput);
+            
+            // Handle file selection
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    const file = e.target.files[0];
+                    const reader = new FileReader();
+                    
+                    reader.onload = (event) => {
+                        try {
+                            const jsonData = event.target.result;
+                            this.importProject(jsonData);
+                            closeModal();
+                        } catch (error) {
+                            console.error('[Projects] Error reading project file:', error);
+                            updateStatus('Error reading project file', CONSTANTS.STATUS_TYPES.ERROR);
+                        }
+                    };
+                    
+                    reader.readAsText(file);
+                }
+                
+                // Reset the file input
+                fileInput.value = '';
+            });
+            
+            // Trigger file selection on button click
+            importProjectBtn.addEventListener('click', () => {
+                fileInput.click();
+            });
+        }
+    },
+    
+    // Handle project events
+    initProjectEvents() {
+        // Create new project button
+        const createProjectBtn = document.getElementById('create-project-btn');
+        if (createProjectBtn) {
+            createProjectBtn.addEventListener('click', () => {
+                this.showCreateProjectModal();
+            });
+        }
+        
+        // Project search
+        const projectSearch = document.getElementById('project-search');
+        if (projectSearch) {
+            projectSearch.addEventListener('input', () => {
+                const searchTerm = projectSearch.value.toLowerCase();
+                const projectItems = document.querySelectorAll('.project-item');
+                
+                projectItems.forEach(item => {
+                    const projectName = item.querySelector('.project-name-area').textContent.toLowerCase();
+                    if (projectName.includes(searchTerm)) {
+                        item.style.display = '';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+            });
+        }
+        
+        // Set up close handlers for project modals
+        const closeCreateModalBtn = document.getElementById('close-create-project-modal');
+        if (closeCreateModalBtn) {
+            closeCreateModalBtn.addEventListener('click', () => {
+                const modal = document.getElementById('create-project-modal');
+                if (modal) modal.style.display = 'none';
+            });
+        }
+        
+        const closeRenameModalBtn = document.getElementById('close-rename-project-modal');
+        if (closeRenameModalBtn) {
+            closeRenameModalBtn.addEventListener('click', () => {
+                const modal = document.getElementById('rename-project-modal');
+                if (modal) modal.style.display = 'none';
+            });
+        }
+        
+        const closeDeleteModalBtn = document.getElementById('close-delete-project-modal');
+        if (closeDeleteModalBtn) {
+            closeDeleteModalBtn.addEventListener('click', () => {
+                const modal = document.getElementById('delete-project-modal');
+                if (modal) modal.style.display = 'none';
+            });
+        }
+        
+        // Click outside to close modals
+        window.addEventListener('click', (e) => {
+            const createModal = document.getElementById('create-project-modal');
+            const renameModal = document.getElementById('rename-project-modal');
+            const deleteModal = document.getElementById('delete-project-modal');
+            
+            if (e.target === createModal) createModal.style.display = 'none';
+            if (e.target === renameModal) renameModal.style.display = 'none';
+            if (e.target === deleteModal) deleteModal.style.display = 'none';
+        });
+        
+        // Submit handlers for project modals
+        const createProjectSubmitBtn = document.getElementById('create-project-submit');
+        if (createProjectSubmitBtn) {
+            createProjectSubmitBtn.addEventListener('click', () => {
+                const nameInput = document.getElementById('new-project-name');
+                if (nameInput && nameInput.value.trim()) {
+                    const id = this.createProject(nameInput.value.trim());
+                    this.switchProject(id);
+                    
+                    // Clear and close modal
+                    nameInput.value = '';
+                    const modal = document.getElementById('create-project-modal');
+                    if (modal) modal.style.display = 'none';
+                } else {
+                    updateStatus('Project name cannot be empty', CONSTANTS.STATUS_TYPES.WARNING);
+                }
+            });
+        }
+        
+        const renameProjectSubmitBtn = document.getElementById('rename-project-submit');
+        if (renameProjectSubmitBtn) {
+            renameProjectSubmitBtn.addEventListener('click', () => {
+                const nameInput = document.getElementById('rename-project-name');
+                const projectIdInput = document.getElementById('rename-project-id');
+                
+                if (nameInput && nameInput.value.trim() && projectIdInput && projectIdInput.value) {
+                    this.renameProject(projectIdInput.value, nameInput.value.trim());
+                    
+                    // Clear and close modal
+                    nameInput.value = '';
+                    projectIdInput.value = '';
+                    const modal = document.getElementById('rename-project-modal');
+                    if (modal) modal.style.display = 'none';
+                } else {
+                    updateStatus('Project name cannot be empty', CONSTANTS.STATUS_TYPES.WARNING);
+                }
+            });
+        }
+        
+        const deleteProjectSubmitBtn = document.getElementById('delete-project-submit');
+        if (deleteProjectSubmitBtn) {
+            deleteProjectSubmitBtn.addEventListener('click', () => {
+                const projectIdInput = document.getElementById('delete-project-id');
+                
+                if (projectIdInput && projectIdInput.value) {
+                    this.deleteProject(projectIdInput.value);
+                    
+                    // Clear and close modal
+                    projectIdInput.value = '';
+                    const modal = document.getElementById('delete-project-modal');
+                    if (modal) modal.style.display = 'none';
+                }
+            });
+        }
+    },
+    
+    // Show modal to create a new project
+    showCreateProjectModal() {
+        const modal = document.getElementById('create-project-modal');
+        const nameInput = document.getElementById('new-project-name');
+        
+        if (modal && nameInput) {
+            nameInput.value = '';
+            modal.style.display = 'flex';
+            nameInput.focus();
+            
+            // Add enter key listener
+            const enterHandler = (e) => {
+                if (e.key === 'Enter') {
+                    document.getElementById('create-project-submit').click();
+                    nameInput.removeEventListener('keyup', enterHandler);
+                }
+            };
+            nameInput.addEventListener('keyup', enterHandler);
+        }
+    },
+    
+    // Show modal to rename a project
+    showRenameProjectModal(projectId) {
+        const modal = document.getElementById('rename-project-modal');
+        const nameInput = document.getElementById('rename-project-name');
+        const projectIdInput = document.getElementById('rename-project-id');
+        
+        if (modal && nameInput && projectIdInput) {
+            const project = this.projectList.find(p => p.id === projectId);
+            if (project) {
+                nameInput.value = project.name;
+                projectIdInput.value = projectId;
+                modal.style.display = 'flex';
+                nameInput.focus();
+                
+                // Add enter key listener
+                const enterHandler = (e) => {
+                    if (e.key === 'Enter') {
+                        document.getElementById('rename-project-submit').click();
+                        nameInput.removeEventListener('keyup', enterHandler);
+                    }
+                };
+                nameInput.addEventListener('keyup', enterHandler);
+            }
+        }
+    },
+    
+    // Show modal to confirm project deletion
+    showDeleteProjectModal(projectId) {
+        const modal = document.getElementById('delete-project-modal');
+        const projectIdInput = document.getElementById('delete-project-id');
+        const projectNameSpan = document.getElementById('delete-project-name');
+        
+        if (modal && projectIdInput && projectNameSpan) {
+            const project = this.projectList.find(p => p.id === projectId);
+            if (project) {
+                projectIdInput.value = projectId;
+                projectNameSpan.textContent = project.name;
+                modal.style.display = 'flex';
+                
+                document.getElementById('delete-project-submit').focus();
+            }
+        }
+    },
+    
+    // Handle project events that were previously using browser dialogs
+    handleCreateProject() {
+        this.showCreateProjectModal();
+    },
+    
+    handleRenameProject(projectId) {
+        this.showRenameProjectModal(projectId);
+    },
+    
+    handleDeleteProject(projectId) {
+        this.showDeleteProjectModal(projectId);
+    },
+    
+    // Export a project to JSON 
+    exportProject(projectId) {
+        const projectData = this.getProjectData(projectId || this.activeProjectId);
+        if (!projectData) {
+            updateStatus('Error exporting project: Project not found', CONSTANTS.STATUS_TYPES.ERROR);
+            return;
+        }
+        
+        try {
+            // Convert to JSON string
+            const jsonString = JSON.stringify(projectData, null, 2);
+            
+            // Create a Blob and download link
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            // Create and trigger download
+            const downloadLink = document.createElement('a');
+            downloadLink.href = url;
+            downloadLink.download = `${projectData.project.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_project.json`;
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+            URL.revokeObjectURL(url);
+            
+            updateStatus(`Project "${projectData.project.name}" exported successfully`, CONSTANTS.STATUS_TYPES.SUCCESS);
+        } catch (error) {
+            console.error('[Projects] Error exporting project:', error);
+            updateStatus('Error exporting project', CONSTANTS.STATUS_TYPES.ERROR);
+        }
+    },
+    
+    // Import a project from JSON
+    importProject(jsonData) {
+        try {
+            // Parse the JSON data
+            const projectData = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
+            
+            // Validate the project data structure
+            if (!projectData.project || !projectData.project.name || !projectData.data) {
+                updateStatus('Invalid project file format', CONSTANTS.STATUS_TYPES.ERROR);
+                return false;
+            }
+            
+            // Generate a new unique ID for the imported project
+            const newProjectId = this.generateProjectId();
+            
+            // Create the project
+            const projectMeta = {
+                id: newProjectId,
+                name: projectData.project.name,
+                created: Date.now(),
+                lastModified: Date.now(),
+                imported: true,
+                originalId: projectData.project.id,
+                importDate: Date.now()
+            };
+            
+            // Add to project list
+            this.projectList.push(projectMeta);
+            this.saveProjectList();
+            
+            // Import all project data
+            const projectDataEntries = Object.entries(projectData.data);
+            for (const [key, value] of projectDataEntries) {
+                // Skip if the key doesn't match any of our known storage keys
+                if (!Object.values(CONSTANTS.LOCAL_STORAGE_KEYS).includes(key)) continue;
+                
+                // Store the data with the new project ID
+                const newKey = `${newProjectId}_${key}`;
+                localStorage.setItem(newKey, value);
+            }
+            
+            updateStatus(`Project "${projectMeta.name}" imported successfully`, CONSTANTS.STATUS_TYPES.SUCCESS);
+            console.log(`[Projects] Imported project "${projectMeta.name}" with ID ${newProjectId}`);
+            
+            // Switch to the new project
+            this.switchProject(newProjectId);
+            
+            return true;
+        } catch (error) {
+            console.error('[Projects] Error importing project:', error);
+            updateStatus('Error importing project', CONSTANTS.STATUS_TYPES.ERROR);
+            return false;
+        }
+    },
+    
+    // Get all data for a specific project
+    getProjectData(projectId) {
+        const project = this.projectList.find(p => p.id === projectId);
+        if (!project) {
+            console.error(`[Projects] Project not found: ${projectId}`);
+            return null;
+        }
+        
+        try {
+            // Save the current project state if exporting the active project
+            if (projectId === this.activeProjectId) {
+                this.saveCurrentProjectState();
+            }
+            
+            // Collect all localStorage keys for this project
+            const allKeys = Object.keys(localStorage);
+            const projectKeys = allKeys.filter(key => key.startsWith(`${projectId}_`));
+            
+            // Create data object with all project values
+            const data = {};
+            projectKeys.forEach(key => {
+                // Extract the original key without project prefix
+                const originalKey = key.substring(projectId.length + 1);
+                data[originalKey] = localStorage.getItem(key);
+            });
+            
+            return {
+                project: {
+                    id: project.id,
+                    name: project.name,
+                    created: project.created,
+                    lastModified: project.lastModified
+                },
+                data: data
+            };
+        } catch (error) {
+            console.error(`[Projects] Error getting project data for ${projectId}:`, error);
+            return null;
+        }
+    }
+};
+
 // API Key (Replace with secure handling in production)
 // These will be populated from localStorage by loadFromLocalStorage
 let grokApiKey = ''; 
@@ -192,9 +1039,9 @@ Source Text to Translate:
 
 {source_text}`;
 
-// Model Pricing Data (Example - Update with actual Groq pricing if available)
+// Model Pricing Data (Example - Update with actual grok pricing if available)
 const modelPricing = {
-    // Groq Prices (per million tokens, based on image)
+    // grok Prices (per million tokens, based on image)
     'grok-3-latest':            { input: '$3.00', completion: '$15.00', context: '131k' },
     'grok-3-fast-latest':       { input: '$5.00', completion: '$25.00', context: '131k' },
     'grok-3-mini-latest':       { input: '$0.30', completion: '$0.50', context: '131k' },
@@ -230,6 +1077,56 @@ async function loadTunnelConfig() {
 document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLoaded async
     console.info('[DOMReady] DOM fully loaded and parsed. Initializing application...');
     try {
+        // Initialize ProjectManager first
+        console.info('[DOMReady] Phase 0: Initializing Project Manager...');
+        ProjectManager.init();
+        
+        // Set up sidebar toggle immediately to ensure it works
+        const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
+        console.log('[DEBUG] Toggle sidebar button element:', toggleSidebarBtn);
+        
+        if (toggleSidebarBtn) {
+            console.log('[UI] Setting up sidebar toggle button');
+            toggleSidebarBtn.addEventListener('click', function() {
+                console.log('[DEBUG] Toggle sidebar button clicked');
+                const sidebar = document.getElementById('project-sidebar');
+                console.log('[DEBUG] Sidebar element:', sidebar);
+                
+                if (sidebar) {
+                    console.log('[UI] Toggling sidebar collapsed state. Current class list:', sidebar.classList);
+                    sidebar.classList.toggle('collapsed');
+                    console.log('[UI] Sidebar class list after toggle:', sidebar.classList);
+                    
+                    // Toggle the icon direction
+                    const icon = this.querySelector('i');
+                    console.log('[DEBUG] Toggle icon element:', icon);
+                    
+                    if (icon) {
+                        if (sidebar.classList.contains('collapsed')) {
+                            console.log('[UI] Changing icon to right-arrow');
+                            icon.classList.remove('fa-chevron-left');
+                            icon.classList.add('fa-chevron-right');
+                        } else {
+                            console.log('[UI] Changing icon to left-arrow');
+                            icon.classList.remove('fa-chevron-right');
+                            icon.classList.add('fa-chevron-left');
+                        }
+                    }
+                }
+            });
+        } else {
+            console.warn('[UI] Sidebar toggle button not found');
+        }
+        
+        // Mobile sidebar toggle
+        const showSidebarBtn = document.getElementById('show-sidebar-btn');
+        if (showSidebarBtn) {
+            showSidebarBtn.addEventListener('click', () => {
+                const sidebar = document.getElementById('project-sidebar');
+                if (sidebar) sidebar.classList.toggle('show');
+            });
+        }
+        
         // Load tunnel config first
         console.info('[DOMReady] Phase 1: Loading tunnel configuration...');
         await loadTunnelConfig(); // Await the loading of the tunnel config
@@ -420,6 +1317,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // if (fandomBox) fandomBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT, fandomBox.value));
 
 if (sourceLanguageInput) sourceLanguageInput.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.SOURCE_LANGUAGE, sourceLanguageInput.value));
+if (targetLanguageInput) targetLanguageInput.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.TARGET_LANGUAGE, targetLanguageInput.value)); // Added listener for target language
 if (temperatureSlider) temperatureSlider.addEventListener('input', handleTemperatureChange);
 if (streamToggle) streamToggle.addEventListener('change', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.STREAM_ENABLED, streamToggle.checked));
 
@@ -1616,19 +2514,23 @@ function copyToClipboard(text) {
 
 // Save data to local storage
 function saveToLocalStorage(key, value) {
+    // Check if this key should be project-scoped
+    const isGlobalKey = CONSTANTS.PROJECT_STORAGE.GLOBAL_KEYS.includes(key);
+    const storageKey = isGlobalKey ? key : ProjectManager.getScopedKey(key);
+    
     const valueToStore = typeof value === 'boolean' ? String(value) : value;
     try {
-        localStorage.setItem(key, valueToStore);
+        localStorage.setItem(storageKey, valueToStore);
         // Avoid logging the actual value for potentially large content like promptContent or translationContent
         if (key === CONSTANTS.LOCAL_STORAGE_KEYS.GROK_API_KEY || key === CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY) {
-            console.log(`[LocalStorage] Saved ${key}: (API key - value not logged)`);
+            console.log(`[LocalStorage] Saved ${storageKey}: (API key - value not logged)`);
         } else if (valueToStore && valueToStore.length > 100) { // Heuristic for large content
-            console.log(`[LocalStorage] Saved ${key}: (large content - value not logged, length: ${valueToStore.length})`);
+            console.log(`[LocalStorage] Saved ${storageKey}: (large content - value not logged, length: ${valueToStore.length})`);
         } else {
-            console.log(`[LocalStorage] Saved ${key}: ${valueToStore}`);
+            console.log(`[LocalStorage] Saved ${storageKey}: ${valueToStore}`);
         }
     } catch (e) {
-        console.error(`[LocalStorage] Error saving ${key} to localStorage:`, e);
+        console.error(`[LocalStorage] Error saving ${storageKey} to localStorage:`, e);
         updateStatus('Warning: Could not save data to local storage. It might be full.', CONSTANTS.STATUS_TYPES.WARNING);
     }
 }
@@ -1638,11 +2540,18 @@ function loadFromLocalStorage() {
         console.info('[LocalStorage] Starting to load data from local storage.');
         document.body.classList.add('dark-mode'); // Ensure dark mode is always on
 
+        // Load global settings (API keys)
         let loadedGrokKey = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.GROK_API_KEY) || ''; 
         let loadedDeepSeekKey = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY) || '';
         grokApiKey = loadedGrokKey;
         deepseekApiKey = loadedDeepSeekKey;
         console.log('[LocalStorage] API Keys loaded (values not displayed).');
+
+        // Helper function to get the project-scoped key
+        const getStorageKey = (key) => {
+            const isGlobalKey = CONSTANTS.PROJECT_STORAGE.GLOBAL_KEYS.includes(key);
+            return isGlobalKey ? key : ProjectManager.getScopedKey(key);
+        };
 
         // Modal Elements
         const apiSettingsModal = document.getElementById('api-settings-modal');
@@ -1734,38 +2643,61 @@ function loadFromLocalStorage() {
         if (grokApiKeyInput) grokApiKeyInput.value = grokApiKey;
         if (deepseekApiKeyInput) deepseekApiKeyInput.value = deepseekApiKey;
 
-        if (translationBox) translationBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.TRANSLATION_CONTENT) || '';
-        if (promptBox) promptBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT) || defaultPromptTemplate;
-        if (notesBox) notesBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.NOTES_CONTENT) || '';
-        if (fandomBox) fandomBox.value = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT) || '';
+        // Load project-scoped content
+        if (translationBox) {
+            const key = getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.TRANSLATION_CONTENT);
+            translationBox.value = localStorage.getItem(key) || '';
+        }
         
-        const savedOutput = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.OUTPUT_CONTENT) || '';
+        if (promptBox) {
+            const key = getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT);
+            promptBox.value = localStorage.getItem(key) || defaultPromptTemplate;
+        }
+        
+        if (notesBox) {
+            const key = getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.NOTES_CONTENT);
+            notesBox.value = localStorage.getItem(key) || '';
+        }
+        
+        if (fandomBox) {
+            const key = getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT);
+            fandomBox.value = localStorage.getItem(key) || '';
+        }
+        
+        const savedOutput = localStorage.getItem(getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.OUTPUT_CONTENT)) || '';
         if (outputBox) outputBox.innerHTML = savedOutput || '';
 
-        const savedStream = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.STREAM_ENABLED);
+        const savedStream = localStorage.getItem(getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.STREAM_ENABLED));
         if (streamToggle) streamToggle.checked = savedStream === 'true';
 
-        const savedModel = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.SELECTED_MODEL);
+        const savedModel = localStorage.getItem(getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.SELECTED_MODEL));
         if (modelSelect && savedModel) modelSelect.value = savedModel;
 
-        const savedInterChunkSummaryEnabled = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.INTER_CHUNK_SUMMARY_ENABLED);
+        const savedInterChunkSummaryEnabled = localStorage.getItem(getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.INTER_CHUNK_SUMMARY_ENABLED));
         const interChunkSummaryToggle = document.getElementById('inter-chunk-summary-toggle');
         if (interChunkSummaryToggle) interChunkSummaryToggle.checked = savedInterChunkSummaryEnabled === 'true'; // Default to false if not found
 
-        const savedSourceLang = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.SOURCE_LANGUAGE);
+        const savedSourceLang = localStorage.getItem(getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.SOURCE_LANGUAGE));
         if (sourceLanguageInput) {
             sourceLanguageInput.value = savedSourceLang || CONSTANTS.DEFAULT_VALUES.SOURCE_LANGUAGE;
         }
 
-        const savedTemperature = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.TEMPERATURE);
+        const savedTargetLang = localStorage.getItem(getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.TARGET_LANGUAGE));
+        if (targetLanguageInput) {
+            targetLanguageInput.value = savedTargetLang || 'English'; // Default to English if not found
+        }
+
+        const savedTemperature = localStorage.getItem(getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.TEMPERATURE));
         if (temperatureSlider) {
             temperatureSlider.value = savedTemperature || CONSTANTS.DEFAULT_VALUES.TEMPERATURE;
         }
         handleTemperatureChange(); // This will also log the temperature change
         updatePricingDisplay();
         renderGlossary(); // Render glossary on load
+        loadSavedPromptTemplatesToSelect(); // Load saved prompts
+        
         console.info('[LocalStorage] Finished loading data from local storage.');
-        updateStatus('Loaded previous session from local storage.', CONSTANTS.STATUS_TYPES.INFO, CONSTANTS.TIMEOUTS.STATUS_LOADED_SESSION);
+        updateStatus('Loaded project data from local storage.', CONSTANTS.STATUS_TYPES.INFO, CONSTANTS.TIMEOUTS.STATUS_LOADED_SESSION);
         
         // Initial word counts after loading from local storage
         if (translationBox && document.getElementById('input-word-count')) {
@@ -1779,7 +2711,7 @@ function loadFromLocalStorage() {
         // Load and set glossary replace toggle state
         const glossaryReplaceToggleElement = document.getElementById('glossary-replace-toggle');
         if (glossaryReplaceToggleElement) {
-            const savedReplaceToggle = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_REPLACE_TOGGLE);
+            const savedReplaceToggle = localStorage.getItem(getStorageKey(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_REPLACE_TOGGLE));
             glossaryReplaceActive = savedReplaceToggle === 'true';
             glossaryReplaceToggleElement.checked = glossaryReplaceActive;
             console.log(`[GlossaryReplace] Initial toggle state: ${glossaryReplaceActive}`);
@@ -1805,9 +2737,6 @@ function loadFromLocalStorage() {
         // Apply critical defaults if local storage fails catastrophically
         if (promptBox) promptBox.value = defaultPromptTemplate;
         if (modelSelect) modelSelect.value = 'grok-3-latest'; // A sensible default model
-        handleTemperatureChange(); // To set default temp display
-        updatePricingDisplay();
-        document.body.classList.add('dark-mode'); // Ensure dark mode anyway
     }
 }
 
@@ -1934,61 +2863,105 @@ textAreasForAutoSave.forEach(textarea => {
 
 // --- Prompt Template Management Functions ---
 function getSavedPrompts() {
-    const promptsJson = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.SAVED_PROMPTS);
-    return promptsJson ? JSON.parse(promptsJson) : {};
+    try {
+        const storageKey = ProjectManager.getScopedKey(CONSTANTS.LOCAL_STORAGE_KEYS.SAVED_PROMPTS);
+        const savedPromptsJson = localStorage.getItem(storageKey);
+        return savedPromptsJson ? JSON.parse(savedPromptsJson) : {};
+    } catch (error) {
+        console.error('[Prompts] Error loading saved prompts:', error);
+        return {};
+    }
 }
 
 function savePromptsToStorage(prompts) {
-    localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.SAVED_PROMPTS, JSON.stringify(prompts));
+    try {
+        const storageKey = ProjectManager.getScopedKey(CONSTANTS.LOCAL_STORAGE_KEYS.SAVED_PROMPTS);
+        localStorage.setItem(storageKey, JSON.stringify(prompts));
+        console.log('[Prompts] Saved prompts to localStorage.');
+    } catch (error) {
+        console.error('[Prompts] Error saving prompts:', error);
+        updateStatus('Error saving prompts. They might be too large for localStorage.', CONSTANTS.STATUS_TYPES.ERROR);
+    }
 }
 
 function loadSavedPromptTemplatesToSelect() {
-    if (!savedPromptsSelect) return;
-    const savedPrompts = getSavedPrompts();
-    savedPromptsSelect.innerHTML = '<option value="">-- Select a saved prompt --</option>'; // Clear existing options but keep placeholder
+    if (!savedPromptsSelect) {
+        console.error('[Prompts] Saved prompts select element not found');
+        return;
+    }
 
-    for (const name in savedPrompts) {
-        if (savedPrompts.hasOwnProperty(name)) {
+    // Clear existing options
+    while (savedPromptsSelect.options.length > 1) {
+        savedPromptsSelect.remove(1);
+    }
+
+    try {
+        const storageKey = ProjectManager.getScopedKey(CONSTANTS.LOCAL_STORAGE_KEYS.SAVED_PROMPTS);
+        const savedPromptsJson = localStorage.getItem(storageKey);
+        if (!savedPromptsJson) {
+            console.log('[Prompts] No saved prompts found in localStorage');
+            return;
+        }
+
+        const savedPrompts = JSON.parse(savedPromptsJson);
+        for (const promptName in savedPrompts) {
             const option = document.createElement('option');
-            option.value = name;
-            option.textContent = name;
+            option.value = promptName;
+            option.textContent = promptName;
             savedPromptsSelect.appendChild(option);
         }
+        console.log(`[Prompts] Loaded ${Object.keys(savedPrompts).length} saved prompts`);
+    } catch (error) {
+        console.error('[Prompts] Error loading saved prompts:', error);
     }
 }
 
 function handleSavePromptAs() {
-    const name = promptTemplateNameInput.value.trim();
-    if (!name) {
-        updateStatus('Please enter a name for the prompt template.', CONSTANTS.STATUS_TYPES.WARNING);
+    const promptName = promptTemplateNameInput.value.trim();
+    const promptContent = promptBox.value.trim();
+
+    if (!promptName) {
+        updateStatus('Please enter a name for the prompt template', CONSTANTS.STATUS_TYPES.WARNING);
         promptTemplateNameInput.focus();
-        console.warn('[PromptTemplate] Save failed: No name provided.');
         return;
     }
-    if (!promptBox) return;
-    const templateContent = promptBox.value;
-    if (!templateContent.trim()) {
-        updateStatus('Prompt content cannot be empty.', CONSTANTS.STATUS_TYPES.WARNING);
+
+    if (!promptContent) {
+        updateStatus('Prompt template content cannot be empty', CONSTANTS.STATUS_TYPES.WARNING);
         promptBox.focus();
-        console.warn('[PromptTemplate] Save failed: Prompt content empty.');
         return;
     }
 
-    const savedPrompts = getSavedPrompts();
-    if (savedPrompts[name]) {
-        if (!confirm(`A prompt named '${name}' already exists. Overwrite it?`)) {
-            console.log('[PromptTemplate] Overwrite of prompt declined by user.');
-            return;
+    try {
+        const storageKey = ProjectManager.getScopedKey(CONSTANTS.LOCAL_STORAGE_KEYS.SAVED_PROMPTS);
+        let savedPrompts = {};
+        const savedPromptsJson = localStorage.getItem(storageKey);
+        if (savedPromptsJson) {
+            savedPrompts = JSON.parse(savedPromptsJson);
         }
-        console.log(`[PromptTemplate] User confirmed overwrite for prompt: '${name}'.`);
-    }
 
-    savedPrompts[name] = templateContent;
-    savePromptsToStorage(savedPrompts);
-    loadSavedPromptTemplatesToSelect(); // Refresh dropdown
-    promptTemplateNameInput.value = ''; // Clear name input
-    updateStatus(`Prompt template '${name}' saved.`, CONSTANTS.STATUS_TYPES.SUCCESS);
-    console.info(`[PromptTemplate] Prompt template '${name}' saved successfully.`);
+        // Check if name already exists
+        if (savedPrompts[promptName]) {
+            if (!confirm(`A prompt template with the name "${promptName}" already exists. Do you want to overwrite it?`)) {
+                return;
+            }
+        }
+
+        // Save the new template
+        savedPrompts[promptName] = promptContent;
+        localStorage.setItem(storageKey, JSON.stringify(savedPrompts));
+        updateStatus(`Prompt template "${promptName}" saved successfully`, CONSTANTS.STATUS_TYPES.SUCCESS);
+        console.log(`[Prompts] Saved prompt template: ${promptName}`);
+
+        // Update the select dropdown
+        loadSavedPromptTemplatesToSelect();
+        
+        // Select the newly saved prompt
+        savedPromptsSelect.value = promptName;
+    } catch (error) {
+        console.error('[Prompts] Error saving prompt template:', error);
+        updateStatus('Error saving prompt template', CONSTANTS.STATUS_TYPES.ERROR);
+    }
 }
 
 function handleLoadSelectedPrompt() {
@@ -2062,25 +3035,26 @@ const DEFAULT_GLOSSARY_CATEGORY = 'Ungategorized'; // Default category
 const CHARACTER_GLOSSARY_CATEGORIES = ["Characters"]; // Define which categories are considered character names
 
 function getGlossary() {
-    const glossaryJson = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_TERMS);
-    if (glossaryJson) {
-        try {
-            const parsed = JSON.parse(glossaryJson);
-            // Basic validation: check if it's an object (could be more robust)
-            if (typeof parsed === 'object' && parsed !== null) {
-                return parsed;
-            }
-            console.warn('[Glossary] Parsed glossary from localStorage is not a valid object. Returning default.');
-        } catch (e) {
-            console.error('[Glossary] Error parsing glossary from localStorage. Returning default.', e);
-        }
+    try {
+        const storageKey = ProjectManager.getScopedKey(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_TERMS);
+        const glossaryJson = localStorage.getItem(storageKey);
+        return glossaryJson ? JSON.parse(glossaryJson) : {};
+    } catch (e) {
+        console.error('[Glossary] Error loading glossary:', e);
+        return {};
     }
-    return {}; // Return empty object if nothing in storage or parse error - will be populated with categories as needed
 }
 
 function saveGlossary(glossary) {
-    localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_TERMS, JSON.stringify(glossary));
-    console.log('[Glossary] Glossary saved to localStorage.', glossary);
+    try {
+        const storageKey = ProjectManager.getScopedKey(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_TERMS);
+        const glossaryJson = JSON.stringify(glossary);
+        localStorage.setItem(storageKey, glossaryJson);
+        console.log('[Glossary] Saved glossary to localStorage.');
+    } catch (e) {
+        console.error('[Glossary] Error saving glossary:', e);
+        updateStatus('Error saving glossary. It might be too large for localStorage.', CONSTANTS.STATUS_TYPES.ERROR);
+    }
 }
 
 function renderGlossary() {
@@ -2327,7 +3301,7 @@ async function handleAIGlossaryGeneration() {
     const notes = notesBox.value.trim() || CONSTANTS.DEFAULT_VALUES.NOTES;
     const selectedModel = modelSelect.value;
     const sourceLanguage = sourceLanguageInput.value.trim() || CONSTANTS.DEFAULT_VALUES.SOURCE_LANGUAGE;
-    const targetLanguage = targetLanguageInput ? (targetLanguageInput.textContent || 'English') : 'English';
+    const targetLanguage = targetLanguageInput ? (targetLanguageInput.value.trim() || 'English') : 'English'; // Changed from .textContent to .value
     const temperature = 0.3;
 
     if (!originalSourceText) {
@@ -2644,3 +3618,15 @@ function handleReplaceInInput(forceReplace = false) {
         console.log('[GlossaryReplace] Finished. No terms needed replacement or found.');
     }
 }
+
+// Main initialization when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('Document loaded. Initializing application...');
+    
+    // Initialize ProjectManager first
+    ProjectManager.init();
+    
+    loadFromLocalStorage();
+    
+    // ... rest of the function remains unchanged
+});

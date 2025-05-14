@@ -11,276 +11,383 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="app-container">
-        <header class="app-header">
-            <h1><i class="fas fa-language" aria-hidden="true"></i> Fanfic Translator</h1>
-            <div class="header-controls">
-                <button id="api-settings-btn" class="action-btn" title="API Settings" aria-haspopup="dialog"><i class="fas fa-key" aria-hidden="true"></i> API Keys</button>
+    <div class="app-wrapper">
+        <!-- Project Sidebar -->
+        <div class="project-sidebar" id="project-sidebar">
+            <div class="sidebar-header">
+                <h3>Projects</h3>
+                <button id="toggle-sidebar-btn" class="action-btn" title="Toggle Sidebar">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
             </div>
-        </header>
-        <div class="settings-grid">
-            <div class="card">
-                <div class="card-header">
-                    <h2><i class="fas fa-brain"></i> Model</h2>
-                </div>
-                <div class="input-group">
-                    <label for="model-select">Translation Model:</label>
-                    <select id="model-select">
-                        <optgroup label="Groq">
-                            <option value="grok-3-latest" selected>grok-3-latest</option>
-                            <option value="grok-3-fast-latest">grok-3-fast-latest</option>
-                            <option value="grok-3-mini-latest">grok-3-mini-latest</option>
-                            <option value="grok-3-mini-fast-latest">grok-3-mini-fast-latest</option>
-                        </optgroup>
-                        <optgroup label="DeepSeek">
-                            <option value="deepseek-chat">DeepSeek</option>
-                        </optgroup>
-                    </select>
-                    <div id="pricing-display" class="pricing-info"></div>
-                </div>
+            <div class="sidebar-controls">
+                <button id="create-project-btn" class="action-btn"><i class="fas fa-plus"></i> New Project</button>
+                <input type="text" id="project-search" placeholder="Search projects...">
             </div>
-
-            <div class="card">
-                <div class="card-header">
-                    <h2><i class="fas fa-globe"></i> Languages</h2>
-                </div>
-                <div class="input-group">
-                    <label for="source-language">Source Language:</label>
-                    <input type="text" id="source-language" placeholder="e.g., Chinese" value="Chinese">
-                </div>
-                <div class="input-group">
-                    <label for="target-language">Target Language:</label>
-                    <div id="target-language" class="text-display">English</div>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-header">
-                    <h2><i class="fas fa-thermometer-half"></i> Temperature</h2>
-                </div>
-                <div class="input-group">
-                    <label for="temperature-slider">Creativity: <span id="temperature-value">0.7</span></label>
-                    <input type="range" id="temperature-slider" min="0" max="2" step="0.1" value="0.7">
-                    <div class="temp-info">Lower = more accurate, Higher = more creative</div>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-header">
-                    <h2><i class="fas fa-cogs"></i> Options</h2>
-                </div>
-                <div class="input-group checkbox-group">
-                    <input type="checkbox" id="stream-toggle" name="stream-toggle">
-                    <label for="stream-toggle">Enable Streaming Response</label>
-                    <span class="tooltip">(Shows results as they arrive)</span>
-                </div>
-                <div class="input-group checkbox-group">
-                    <input type="checkbox" id="inter-chunk-summary-toggle" name="inter-chunk-summary-toggle">
-                    <label for="inter-chunk-summary-toggle">Enable Inter-Chunk Summaries</label>
-                    <span class="tooltip">(Provides better context between large text chunks, but increases API usage/cost)</span>
-                </div>
+            <div class="project-list" id="project-list">
+                <!-- Project items will be dynamically inserted here -->
             </div>
         </div>
 
-        <main class="main-content-area">
-            <!-- Input and Output side by side -->
-            <div class="input-output-container">
-                <!-- Input Container -->
-                <div class="input-container">
-                    <div class="card">
-                        <div class="card-header">
-                            <h2><i class="fas fa-file-alt"></i> Source Text</h2>
-                            <div class="header-info-counters">
-                                <div class="word-counter" id="input-word-count">
-                                    0 words | 0 chars
-                                </div>
-                                <div class="token-counter" id="input-token-count">
-                                    Estimated Tokens: N/A
-                                </div>
-                                <div class="cost-estimator" id="input-cost-estimate">
-                                    Estimated Cost: N/A
+        <!-- Main App Container -->
+        <div class="app-container">
+            <header class="app-header">
+                <div class="header-left">
+                    <button id="show-sidebar-btn" class="sidebar-toggle-mobile action-btn">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <h1><i class="fas fa-language" aria-hidden="true"></i> Fanfic Translator</h1>
+                </div>
+                <div class="current-project">
+                    <span id="active-project-name">Default Project</span>
+                    <button id="project-settings-btn" class="action-btn" title="Project Settings">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
+                <div class="header-controls">
+                    <button id="api-settings-btn" class="action-btn" title="API Settings" aria-haspopup="dialog"><i class="fas fa-key" aria-hidden="true"></i> API Keys</button>
+                </div>
+            </header>
+            <div class="settings-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-brain"></i> Model</h2>
+                    </div>
+                    <div class="input-group">
+                        <label for="model-select">Translation Model:</label>
+                        <select id="model-select">
+                            <optgroup label="Groq">
+                                <option value="grok-3-latest" selected>grok-3-latest</option>
+                                <option value="grok-3-fast-latest">grok-3-fast-latest</option>
+                                <option value="grok-3-mini-latest">grok-3-mini-latest</option>
+                                <option value="grok-3-mini-fast-latest">grok-3-mini-fast-latest</option>
+                            </optgroup>
+                            <optgroup label="DeepSeek">
+                                <option value="deepseek-chat">DeepSeek</option>
+                            </optgroup>
+                        </select>
+                        <div id="pricing-display" class="pricing-info"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-globe"></i> Languages</h2>
+                    </div>
+                    <div class="input-group">
+                        <label for="source-language">Source Language:</label>
+                        <input type="text" id="source-language" placeholder="e.g., Chinese" value="Chinese">
+                    </div>
+                    <div class="input-group">
+                        <label for="target-language">Target Language:</label>
+                        <input type="text" id="target-language" placeholder="e.g., English" value="English">
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-thermometer-half"></i> Temperature</h2>
+                    </div>
+                    <div class="input-group">
+                        <label for="temperature-slider">Creativity: <span id="temperature-value">0.7</span></label>
+                        <input type="range" id="temperature-slider" min="0" max="2" step="0.1" value="0.7">
+                        <div class="temp-info">Lower = more accurate, Higher = more creative</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-cogs"></i> Options</h2>
+                    </div>
+                    <div class="input-group checkbox-group">
+                        <input type="checkbox" id="stream-toggle" name="stream-toggle">
+                        <label for="stream-toggle">Enable Streaming Response</label>
+                        <span class="tooltip">(Shows results as they arrive)</span>
+                    </div>
+                    <div class="input-group checkbox-group">
+                        <input type="checkbox" id="inter-chunk-summary-toggle" name="inter-chunk-summary-toggle">
+                        <label for="inter-chunk-summary-toggle">Enable Inter-Chunk Summaries</label>
+                        <span class="tooltip">(Provides better context between large text chunks, but increases API usage/cost)</span>
+                    </div>
+                </div>
+            </div>
+
+            <main class="main-content-area">
+                <!-- Input and Output side by side -->
+                <div class="input-output-container">
+                    <!-- Input Container -->
+                    <div class="input-container">
+                        <div class="card">
+                            <div class="card-header">
+                                <h2><i class="fas fa-file-alt"></i> Source Text</h2>
+                                <div class="header-info-counters">
+                                    <div class="word-counter" id="input-word-count">
+                                        0 words | 0 chars
+                                    </div>
+                                    <div class="token-counter" id="input-token-count">
+                                        Estimated Tokens: N/A
+                                    </div>
+                                    <div class="cost-estimator" id="input-cost-estimate">
+                                        Estimated Cost: N/A
+                                    </div>
                                 </div>
                             </div>
+                            <textarea id="translation-box" placeholder="Enter text to translate here..."></textarea>
+                            <div class="textarea-controls">
+                                <button id="clear-input-btn" class="clear-btn"><i class="fas fa-trash-alt"></i> Clear</button>
+                                <button id="translate-btn" class="primary-action-btn"><i class="fas fa-language"></i> Translate</button>
+                                <button id="stop-btn" class="danger-btn" style="display:none;"><i class="fas fa-stop-circle"></i> Stop</button>
+                            </div>
                         </div>
-                        <textarea id="translation-box" placeholder="Enter text to translate here..."></textarea>
-                        <div class="textarea-controls">
-                            <button id="clear-input-btn" class="clear-btn"><i class="fas fa-trash-alt"></i> Clear</button>
-                            <button id="translate-btn" class="primary-action-btn"><i class="fas fa-language"></i> Translate</button>
-                            <button id="stop-btn" class="danger-btn" style="display:none;"><i class="fas fa-stop-circle"></i> Stop</button>
+                    </div>
+
+                    <!-- Status Bar - Moved between input and output containers -->
+                    <div class="card status-bar central-status" id="intermediate-status-bar">
+                        <p id="status-message" aria-live="polite">Ready</p>
+                        <div id="progress-indicator-container" class="progress-indicator-container"></div>
+                    </div>
+
+                    <!-- Output Container -->
+                    <div class="output-container">
+                        <div class="card output-card">
+                            <div class="card-header">
+                                <h2><i class="fas fa-language"></i> Translation Output</h2>
+                                <div class="word-counter" id="output-word-count">0 words | 0 chars</div>
+                            </div>
+                            <div class="output-box" id="output-box" contenteditable="true" placeholder="Translation will appear here..."></div>
+                            <div class="textarea-controls output-controls">
+                                <button id="copy-output-btn" class="action-btn"><i class="fas fa-copy"></i> Copy Output</button>
+                                <button id="save-output-btn" class="save-btn" data-target="output-box"><i class="fas fa-save"></i> Save</button>
+                                <button id="generate-summary-btn" class="primary-action-btn"><i class="fas fa-list-alt"></i> Generate Summary</button>
+                                <button id="clear-output-area-btn" class="action-btn clear-btn"><i class="fas fa-trash-alt"></i> Clear Output</button>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Status Bar - Moved between input and output containers -->
-                <div class="card status-bar central-status" id="intermediate-status-bar">
-                    <p id="status-message" aria-live="polite">Ready</p>
-                    <div id="progress-indicator-container" class="progress-indicator-container"></div>
-                </div>
+                <!-- Controls Container -->
+                <div class="controls-container">
+                    <!-- First Row: Prompt Template Management and Glossary -->
+                    <div class="control-row">
+                        <!-- Prompt Template Management -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2><i class="fas fa-scroll"></i> Prompt Template Management</h2>
+                            </div>
+                            <div class="input-group">
+                                <label for="prompt-template-name">Prompt Name:</label>
+                                <input type="text" id="prompt-template-name" placeholder="Enter a name for this prompt">
+                            </div>
+                            <div class="textarea-controls prompt-management-controls">
+                                <button id="save-prompt-as-btn" class="action-btn"><i class="fas fa-save"></i> Save Current as New</button>
+                            </div>
+                            <div class="input-group">
+                                <label for="saved-prompts-select">Saved Prompts:</label>
+                                <select id="saved-prompts-select">
+                                    <option value="">-- Select a saved prompt --</option>
+                                </select>
+                            </div>
+                            <div class="textarea-controls prompt-management-controls">
+                                <button id="load-prompt-btn" class="action-btn"><i class="fas fa-upload"></i> Load Selected</button>
+                                <button id="delete-prompt-btn" class="danger-btn"><i class="fas fa-trash-alt"></i> Delete Selected</button>
+                            </div>
+                            <textarea id="prompt-box" placeholder="Enter your detailed prompt template here..."></textarea>
+                            <div class="placeholder-buttons-container" id="prompt-placeholder-buttons">
+                                <button class="placeholder-btn" data-placeholder="{source_language}">Source Lang</button>
+                                <button class="placeholder-btn" data-placeholder="{target_language}">Target Lang</button>
+                                <button class="placeholder-btn" data-placeholder="{fandom_context}">Fandom Context</button>
+                                <button class="placeholder-btn" data-placeholder="{notes}">Notes</button>
+                                <button class="placeholder-btn" data-placeholder="{previous_chapter_summary}">Prev. Ch. Summary</button>
+                                <button class="placeholder-btn" data-placeholder="{previous_chunk_summaries}">Prev. Chunk Sums</button>
+                                <button class="placeholder-btn" data-placeholder="{source_text}">Source Text</button>
+                                <button class="placeholder-btn" data-placeholder="{glossary_terms}">Glossary Terms</button>
+                            </div>
+                            <div class="textarea-controls">
+                                <button class="save-btn" data-target="prompt-box"><i class="fas fa-save"></i> Save Prompt Text</button>
+                            </div>
+                        </div>
 
-                <!-- Output Container -->
-                <div class="output-container">
-                    <div class="card output-card">
-                        <div class="card-header">
-                            <h2><i class="fas fa-language"></i> Translation Output</h2>
-                            <div class="word-counter" id="output-word-count">0 words | 0 chars</div>
-                        </div>
-                        <div class="output-box" id="output-box" contenteditable="true" placeholder="Translation will appear here..."></div>
-                        <div class="textarea-controls output-controls">
-                            <button id="copy-output-btn" class="action-btn"><i class="fas fa-copy"></i> Copy Output</button>
-                            <button id="save-output-btn" class="save-btn" data-target="output-box"><i class="fas fa-save"></i> Save</button>
-                            <button id="generate-summary-btn" class="primary-action-btn"><i class="fas fa-list-alt"></i> Generate Summary</button>
-                            <button id="clear-output-area-btn" class="action-btn clear-btn"><i class="fas fa-trash-alt"></i> Clear Output</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Controls Container -->
-            <div class="controls-container">
-                <!-- First Row: Prompt Template Management and Glossary -->
-                <div class="control-row">
-                    <!-- Prompt Template Management -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h2><i class="fas fa-scroll"></i> Prompt Template Management</h2>
-                        </div>
-                        <div class="input-group">
-                            <label for="prompt-template-name">Prompt Name:</label>
-                            <input type="text" id="prompt-template-name" placeholder="Enter a name for this prompt">
-                        </div>
-                        <div class="textarea-controls prompt-management-controls">
-                            <button id="save-prompt-as-btn" class="action-btn"><i class="fas fa-save"></i> Save Current as New</button>
-                        </div>
-                        <div class="input-group">
-                            <label for="saved-prompts-select">Saved Prompts:</label>
-                            <select id="saved-prompts-select">
-                                <option value="">-- Select a saved prompt --</option>
-                            </select>
-                        </div>
-                        <div class="textarea-controls prompt-management-controls">
-                            <button id="load-prompt-btn" class="action-btn"><i class="fas fa-upload"></i> Load Selected</button>
-                            <button id="delete-prompt-btn" class="danger-btn"><i class="fas fa-trash-alt"></i> Delete Selected</button>
-                        </div>
-                        <textarea id="prompt-box" placeholder="Enter your detailed prompt template here..."></textarea>
-                        <div class="placeholder-buttons-container" id="prompt-placeholder-buttons">
-                            <button class="placeholder-btn" data-placeholder="{source_language}">Source Lang</button>
-                            <button class="placeholder-btn" data-placeholder="{target_language}">Target Lang</button>
-                            <button class="placeholder-btn" data-placeholder="{fandom_context}">Fandom Context</button>
-                            <button class="placeholder-btn" data-placeholder="{notes}">Notes</button>
-                            <button class="placeholder-btn" data-placeholder="{previous_chapter_summary}">Prev. Ch. Summary</button>
-                            <button class="placeholder-btn" data-placeholder="{previous_chunk_summaries}">Prev. Chunk Sums</button>
-                            <button class="placeholder-btn" data-placeholder="{source_text}">Source Text</button>
-                            <button class="placeholder-btn" data-placeholder="{glossary_terms}">Glossary Terms</button>
-                        </div>
-                        <div class="textarea-controls">
-                            <button class="save-btn" data-target="prompt-box"><i class="fas fa-save"></i> Save Prompt Text</button>
-                        </div>
-                    </div>
-
-                    <!-- Glossary / Terminology -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h2><i class="fas fa-book"></i> Glossary / Terminology</h2>
-                        </div>
-                        <div class="textarea-controls glossary-ai-controls">
-                            <button id="ai-generate-glossary-btn" class="action-btn"><i class="fas fa-robot"></i> Generate Glossary with AI</button>
-                        </div>
-                        <div class="input-group checkbox-group" id="glossary-replace-toggle-group">
-                            <input type="checkbox" id="glossary-replace-toggle" name="glossary-replace-toggle">
-                            <label for="glossary-replace-toggle">Replace Non-Character Terms in Source Text</label>
-                            <span class="tooltip" title="If checked, terms from glossary (except 'Characters') will be automatically replaced in the Source Text area. The {glossary_terms} prompt placeholder will then only include 'Characters'.">(?)</span>
-                        </div>
-                        <div class="input-group">
-                            <label for="glossary-category">Category (Optional):</label>
-                            <input type="text" id="glossary-category" placeholder="e.g., Names, Locations (leave blank for default)">
-                        </div>
-                        <div class="input-group">
-                            <label for="glossary-term-source">Term (Source Language):</label>
-                            <input type="text" id="glossary-term-source" placeholder="e.g., おはよう">
-                        </div>
-                        <div class="input-group">
-                            <label for="glossary-term-target">Preferred Translation (Target Language):</label>
-                            <input type="text" id="glossary-term-target" placeholder="e.g., Good morning">
-                        </div>
-                        <div class="textarea-controls">
-                            <button id="add-glossary-term-btn" class="action-btn"><i class="fas fa-plus-circle"></i> Add Term</button>
-                        </div>
-                        <div id="glossary-display-area" class="glossary-list">
-                            <!-- Glossary terms will be listed here -->
-                            <p class="no-glossary-terms" style="display: none;">No glossary terms defined yet.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Second Row: Notes and Fandom Context -->
-                <div class="control-row">
-                    <!-- Notes & Instructions -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h2><i class="fas fa-sticky-note"></i> Notes & Instructions</h2>
-                        </div>
-                        <textarea id="notes-box" placeholder="Enter specific instructions, voice notes, or terminology here..."></textarea>
-                        <div class="textarea-controls">
-                            <button id="clear-notes-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
-                            <button id="save-notes-btn" class="save-btn"><i class="fas fa-save"></i> Save</button>
+                        <!-- Glossary / Terminology -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2><i class="fas fa-book"></i> Glossary / Terminology</h2>
+                            </div>
+                            <div class="textarea-controls glossary-ai-controls">
+                                <button id="ai-generate-glossary-btn" class="action-btn"><i class="fas fa-robot"></i> Generate Glossary with AI</button>
+                            </div>
+                            <div class="input-group checkbox-group" id="glossary-replace-toggle-group">
+                                <input type="checkbox" id="glossary-replace-toggle" name="glossary-replace-toggle">
+                                <label for="glossary-replace-toggle">Replace Non-Character Terms in Source Text</label>
+                                <span class="tooltip" title="If checked, terms from glossary (except 'Characters') will be automatically replaced in the Source Text area. The {glossary_terms} prompt placeholder will then only include 'Characters'.">(?)</span>
+                            </div>
+                            <div class="input-group">
+                                <label for="glossary-category">Category (Optional):</label>
+                                <input type="text" id="glossary-category" placeholder="e.g., Names, Locations (leave blank for default)">
+                            </div>
+                            <div class="input-group">
+                                <label for="glossary-term-source">Term (Source Language):</label>
+                                <input type="text" id="glossary-term-source" placeholder="e.g., おはよう">
+                            </div>
+                            <div class="input-group">
+                                <label for="glossary-term-target">Preferred Translation (Target Language):</label>
+                                <input type="text" id="glossary-term-target" placeholder="e.g., Good morning">
+                            </div>
+                            <div class="textarea-controls">
+                                <button id="add-glossary-term-btn" class="action-btn"><i class="fas fa-plus-circle"></i> Add Term</button>
+                            </div>
+                            <div id="glossary-display-area" class="glossary-list">
+                                <!-- Glossary terms will be listed here -->
+                                <p class="no-glossary-terms" style="display: none;">No glossary terms defined yet.</p>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Fandom Context -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h2><i class="fas fa-users"></i> Fandom Context</h2>
+                    <!-- Second Row: Notes and Fandom Context -->
+                    <div class="control-row">
+                        <!-- Notes & Instructions -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2><i class="fas fa-sticky-note"></i> Notes & Instructions</h2>
+                            </div>
+                            <textarea id="notes-box" placeholder="Enter specific instructions, voice notes, or terminology here..."></textarea>
+                            <div class="textarea-controls">
+                                <button id="clear-notes-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
+                                <button id="save-notes-btn" class="save-btn" data-target="notes-box"><i class="fas fa-save"></i> Save</button>
+                            </div>
                         </div>
-                        <textarea id="fandom-box" placeholder="Enter fandom-specific context or terminology here..."></textarea>
+
+                        <!-- Fandom Context -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2><i class="fas fa-users"></i> Fandom Context</h2>
+                            </div>
+                            <textarea id="fandom-box" placeholder="Enter fandom-specific context or terminology here..."></textarea>
+                            <div class="textarea-controls">
+                                <button id="clear-fandom-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
+                                <button class="save-btn" data-target="fandom-box"><i class="fas fa-save"></i> Save</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Summary Area -->
+                    <div class="card summary-area" style="display: none;">
+                        <div class="card-header">
+                            <h2><i class="fas fa-clipboard-list"></i> Translation Summary</h2>
+                        </div>
+                        <textarea id="summary-box" placeholder="Generated summary will appear here..."></textarea>
                         <div class="textarea-controls">
-                            <button id="clear-fandom-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
-                            <button class="save-btn" data-target="fandom-box"><i class="fas fa-save"></i> Save</button>
+                            <button id="copy-summary-btn" class="action-btn"><i class="fas fa-copy"></i> Copy</button>
+                            <button id="use-summary-btn" class="primary-action-btn"><i class="fas fa-arrow-right"></i> Add to Notes</button>
+                            <button id="add-to-prompt-btn" class="action-btn"><i class="fas fa-plus-circle"></i> Add to Prompt</button>
                         </div>
                     </div>
                 </div>
-
-                <!-- Summary Area -->
-                <div class="card summary-area" style="display: none;">
+            </main>
+            
+            <footer class="status-area">
+                <div class="card controls-card">
+                    <div class="app-controls">
+                        <button id="save-all-btn" class="action-btn"><i class="fas fa-download"></i> Export All Settings</button>
+                        <button id="clear-all-btn" class="clear-btn"><i class="fas fa-eraser"></i> Reset All</button>
+                        <button id="api-keys-btn" class="action-btn"><i class="fas fa-key"></i> Configure API Keys</button>
+                    </div>
+                </div>
+            </footer>
+            
+            <!-- API Settings Modal -->
+            <div id="api-settings-modal" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="api-settings-heading">
+                <div class="modal-content card">
                     <div class="card-header">
-                        <h2><i class="fas fa-clipboard-list"></i> Translation Summary</h2>
+                        <h2 id="api-settings-heading"><i class="fas fa-key"></i> API Settings</h2>
+                        <button id="close-api-modal" class="close-btn"><i class="fas fa-times"></i></button>
                     </div>
-                    <textarea id="summary-box" placeholder="Generated summary will appear here..."></textarea>
-                    <div class="textarea-controls">
-                        <button id="copy-summary-btn" class="action-btn"><i class="fas fa-copy"></i> Copy</button>
-                        <button id="use-summary-btn" class="primary-action-btn"><i class="fas fa-arrow-right"></i> Add to Notes</button>
-                        <button id="add-to-prompt-btn" class="action-btn"><i class="fas fa-plus-circle"></i> Add to Prompt</button>
+                    <div class="input-group">
+                        <label for="grok-api-key">Grok API Key:</label>
+                        <input type="password" id="grok-api-key" placeholder="Enter your Grok API key">
+                    </div>
+                    <div class="input-group">
+                        <label for="deepseek-api-key">DeepSeek API Key:</label>
+                        <input type="password" id="deepseek-api-key" placeholder="Enter your DeepSeek API key">
+                    </div>
+                    <div class="modal-actions">
+                        <button id="save-api-keys" class="primary-action-btn"><i class="fas fa-save"></i> Save API Keys</button>
                     </div>
                 </div>
             </div>
-        </main>
-        
-        <footer class="status-area">
-            <div class="card controls-card">
-                <div class="app-controls">
-                    <button id="save-all-btn" class="action-btn"><i class="fas fa-download"></i> Export All Settings</button>
-                    <button id="clear-all-btn" class="clear-btn"><i class="fas fa-eraser"></i> Reset All</button>
-                    <button id="api-keys-btn" class="action-btn"><i class="fas fa-key"></i> Configure API Keys</button>
+
+            <!-- Project Settings Modal -->
+            <div id="project-settings-modal" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="project-settings-heading">
+                <div class="modal-content card">
+                    <div class="card-header">
+                        <h2 id="project-settings-heading"><i class="fas fa-folder"></i> Project Settings</h2>
+                        <button id="close-project-modal" class="close-btn"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="input-group">
+                        <label for="project-name-input">Project Name:</label>
+                        <input type="text" id="project-name-input" placeholder="Enter project name">
+                    </div>
+                    <div class="modal-actions">
+                        <button id="export-project-btn" class="action-btn"><i class="fas fa-file-export"></i> Export Project</button>
+                        <button id="import-project-btn" class="action-btn"><i class="fas fa-file-import"></i> Import Project</button>
+                        <button id="delete-current-project-btn" class="danger-btn"><i class="fas fa-trash"></i> Delete Project</button>
+                        <button id="save-project-settings" class="primary-action-btn"><i class="fas fa-save"></i> Save Settings</button>
+                    </div>
                 </div>
             </div>
-        </footer>
-        
-        <!-- API Settings Modal -->
-        <div id="api-settings-modal" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="api-settings-heading">
-            <div class="modal-content card">
-                <div class="card-header">
-                    <h2 id="api-settings-heading"><i class="fas fa-key"></i> API Settings</h2>
-                    <button id="close-api-modal" class="close-btn"><i class="fas fa-times"></i></button>
+
+            <!-- Create Project Modal -->
+            <div id="create-project-modal" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="create-project-heading">
+                <div class="modal-content card">
+                    <div class="card-header">
+                        <h2 id="create-project-heading"><i class="fas fa-folder-plus"></i> Create New Project</h2>
+                        <button id="close-create-project-modal" class="close-btn"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="input-group">
+                        <label for="new-project-name">Project Name:</label>
+                        <input type="text" id="new-project-name" placeholder="Enter name for new project">
+                    </div>
+                    <div class="modal-actions">
+                        <button id="create-project-cancel" class="action-btn" onclick="document.getElementById('create-project-modal').style.display='none'"><i class="fas fa-times"></i> Cancel</button>
+                        <button id="create-project-submit" class="primary-action-btn"><i class="fas fa-check"></i> Create Project</button>
+                    </div>
                 </div>
-                <div class="input-group">
-                    <label for="grok-api-key">Grok API Key:</label>
-                    <input type="password" id="grok-api-key" placeholder="Enter your Grok API key">
+            </div>
+
+            <!-- Rename Project Modal -->
+            <div id="rename-project-modal" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="rename-project-heading">
+                <div class="modal-content card">
+                    <div class="card-header">
+                        <h2 id="rename-project-heading"><i class="fas fa-edit"></i> Rename Project</h2>
+                        <button id="close-rename-project-modal" class="close-btn"><i class="fas fa-times"></i></button>
+                    </div>
+                    <input type="hidden" id="rename-project-id">
+                    <div class="input-group">
+                        <label for="rename-project-name">New Project Name:</label>
+                        <input type="text" id="rename-project-name" placeholder="Enter new name for project">
+                    </div>
+                    <div class="modal-actions">
+                        <button id="rename-project-cancel" class="action-btn" onclick="document.getElementById('rename-project-modal').style.display='none'"><i class="fas fa-times"></i> Cancel</button>
+                        <button id="rename-project-submit" class="primary-action-btn"><i class="fas fa-check"></i> Rename Project</button>
+                    </div>
                 </div>
-                <div class="input-group">
-                    <label for="deepseek-api-key">DeepSeek API Key:</label>
-                    <input type="password" id="deepseek-api-key" placeholder="Enter your DeepSeek API key">
-                </div>
-                <div class="modal-actions">
-                    <button id="save-api-keys" class="primary-action-btn"><i class="fas fa-save"></i> Save API Keys</button>
+            </div>
+
+            <!-- Delete Project Confirmation Modal -->
+            <div id="delete-project-modal" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="delete-project-heading">
+                <div class="modal-content card">
+                    <div class="card-header">
+                        <h2 id="delete-project-heading"><i class="fas fa-exclamation-triangle"></i> Delete Project</h2>
+                        <button id="close-delete-project-modal" class="close-btn"><i class="fas fa-times"></i></button>
+                    </div>
+                    <input type="hidden" id="delete-project-id">
+                    <div class="delete-confirmation">
+                        <p>Are you sure you want to delete the project "<span id="delete-project-name"></span>"?</p>
+                        <p class="warning">This action cannot be undone. All project data will be permanently lost.</p>
+                    </div>
+                    <div class="modal-actions">
+                        <button id="delete-project-cancel" class="action-btn" onclick="document.getElementById('delete-project-modal').style.display='none'"><i class="fas fa-times"></i> Cancel</button>
+                        <button id="delete-project-submit" class="danger-btn"><i class="fas fa-trash"></i> Delete Project</button>
+                    </div>
                 </div>
             </div>
         </div>
