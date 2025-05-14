@@ -36,8 +36,8 @@ const loadPromptBtn = document.getElementById('load-prompt-btn');
 const deletePromptBtn = document.getElementById('delete-prompt-btn');
 
 // Word count display elements - to be initialized in DOMContentLoaded
-let inputWordCountEl = null;
-let outputWordCountEl = null;
+// let inputWordCountEl = null; // No longer needed
+// let outputWordCountEl = null; // No longer needed
 
 // Clear All button from the main app controls
 const clearAllAppBtn = document.getElementById('clear-all-btn'); 
@@ -195,25 +195,21 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
         }
         
         // Initialize word counters with null checks
-        const sourceCounter = document.getElementById('source-counter');
-        const outputCounter = document.getElementById('output-counter');
+        const sourceCounterElement = document.getElementById('input-word-count'); // Corrected ID
+        const outputCounterElement = document.getElementById('output-word-count'); // Corrected ID
         
-        if (sourceCounter && translationBox) {
-            const debouncedUpdateInputWordCount = debounce(() => updateWordCount(translationBox, sourceCounter), 250);
-            // updateWordCount(translationBox, sourceCounter); // Initial call
+        if (sourceCounterElement && translationBox) {
+            const debouncedUpdateInputWordCount = debounce(() => updateWordCount(translationBox, sourceCounterElement), 250);
+            // updateWordCount(translationBox, sourceCounterElement); // Initial call handled later in DOMContentLoaded after loading storage
             translationBox.addEventListener('input', debouncedUpdateInputWordCount);
         }
         
-        if (outputCounter && outputBox) {
-            const debouncedUpdateOutputWordCount = debounce(() => updateWordCount(outputBox, outputCounter), 250);
-            // updateWordCount(outputBox, outputCounter); // Initial call
-            // outputBox.addEventListener('input', debouncedUpdateOutputWordCount); // Output box is contenteditable, so its content changes programmatically or via paste
-            // For contenteditable, MutationObserver is more robust for all changes.
-            // However, simple paste and programmatic changes will be handled by calling updateWordCount manually after those operations.
-            // Let's keep the input listener for direct typing, though it might be less common for outputBox.
+        if (outputCounterElement && outputBox) {
+            const debouncedUpdateOutputWordCount = debounce(() => updateWordCount(outputBox, outputCounterElement), 250);
+            // updateWordCount(outputBox, outputCounterElement); // Initial call handled later
             outputBox.addEventListener('input', debouncedUpdateOutputWordCount); 
             outputBox.addEventListener('paste', () => {
-                setTimeout(debouncedUpdateOutputWordCount, 100); // Allow paste to settle
+                setTimeout(debouncedUpdateOutputWordCount, 100); 
             });
         }
         
@@ -277,14 +273,13 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
 
 // ... other event listeners ...
 
-// Add null checks before adding event listeners to prevent errors
-if (promptBox) promptBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT, promptBox.value));
-// The direct listener for fandomBox will be removed as it's handled by the debounced textAreasForAutoSave loop.
-// if (fandomBox) fandomBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT, fandomBox.value));
-if (notesBox) notesBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.NOTES_CONTENT, notesBox.value));
-// No need for outputBox listener, saved after translation completes or when cleared
+// Remove individual non-debounced input listeners for auto-save, rely on textAreasForAutoSave loop below
+// if (promptBox) promptBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT, promptBox.value));
+// if (notesBox) notesBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.NOTES_CONTENT, notesBox.value));
+// if (translationBox) translationBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.TRANSLATION_CONTENT, translationBox.value));
 
-if (translationBox) translationBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.TRANSLATION_CONTENT, translationBox.value));
+// The direct listener for fandomBox was already commented out, which is correct.
+// if (fandomBox) fandomBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT, fandomBox.value));
 
 if (sourceLanguageInput) sourceLanguageInput.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.SOURCE_LANGUAGE, sourceLanguageInput.value));
 if (temperatureSlider) temperatureSlider.addEventListener('input', handleTemperatureChange);
@@ -1264,7 +1259,7 @@ async function handleApiError(response, modelName = 'selected') { // Added model
 function clearSpecificField(elementId, storageKey, wordCountElementId = null) {
     const element = document.getElementById(elementId);
     if (element) {
-        if (elementId === CONSTANTS.LOCAL_STORAGE_KEYS.OUTPUT_CONTENT.replace('Content', '-box')) { // e.g., 'output-box'
+        if (elementId === 'output-box') { // Simplified condition
             element.innerHTML = '';
         } else {
             element.value = '';

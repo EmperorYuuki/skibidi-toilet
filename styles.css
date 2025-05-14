@@ -419,7 +419,7 @@ button:disabled {
 }
 
 #status-message.info { 
-    color: var(--text-muted); 
+    color: var(--text-regular);
 }
 
 /* App Controls */
@@ -1105,4 +1105,30 @@ body.dark-mode .output-controls button:hover,
 body.dark-mode .summary-area button:hover {
     background-color: #005fa3;
     box-shadow: 0 0 15px rgba(0, 123, 255, 0.7); /* Enhanced glow on hover */
+}
+
+.progress-indicator-container {
+    margin-top: 10px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.progress-bar-bg {
+    background-color: var(--input-bg); /* Ensure this uses a theme variable */
+    border-radius: 5px;
+    height: 10px;
+    margin-top: 5px; /* Adjusted from 8px to 5px */
+    overflow: hidden;
+}
+
+.progress-bar-fg {
+    background-color: var(--primary); /* Ensure this uses a theme variable */
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.3s ease;
+}
+
+/* Controls Card in Status Area */
+.controls-card {
+    margin-top: var(--space-md);
 }
