@@ -13,9 +13,9 @@
 <body>
     <div class="app-container">
         <header class="app-header">
-            <h1><i class="fas fa-language"></i> Fanfic Translator</h1>
+            <h1><i class="fas fa-language" aria-hidden="true"></i> Fanfic Translator</h1>
             <div class="header-controls">
-                <button id="api-settings-btn" class="action-btn" title="API Settings"><i class="fas fa-key"></i> API Keys</button>
+                <button id="api-settings-btn" class="action-btn" title="API Settings" aria-haspopup="dialog"><i class="fas fa-key" aria-hidden="true"></i> API Keys</button>
             </div>
         </header>
         <div class="settings-grid">
@@ -82,7 +82,7 @@
             </div>
         </div>
 
-        <div class="main-content-area">
+        <main class="main-content-area">
             <!-- Input and Output side by side -->
             <div class="input-output-container">
                 <!-- Input Container -->
@@ -192,6 +192,9 @@
                     <div class="card-header">
                         <h2><i class="fas fa-book"></i> Glossary / Terminology</h2>
                     </div>
+                    <div class="textarea-controls glossary-ai-controls">
+                        <button id="ai-generate-glossary-btn" class="action-btn"><i class="fas fa-robot"></i> Generate Glossary with AI</button>
+                    </div>
                     <div class="input-group">
                         <label for="glossary-term-source">Term (Source Language):</label>
                         <input type="text" id="glossary-term-source" placeholder="e.g., おはよう">
@@ -234,9 +237,9 @@
                     </div>
                 </div>
             </div>
-        </div>
+        </main>
         
-        <div class="status-area">
+        <footer class="status-area">
             <div class="card controls-card">
                 <div class="app-controls">
                     <button id="save-all-btn" class="action-btn"><i class="fas fa-download"></i> Export All Settings</button>
@@ -244,7 +247,7 @@
                     <button id="api-keys-btn" class="action-btn"><i class="fas fa-key"></i> Configure API Keys</button>
                 </div>
             </div>
-        </div>
+        </footer>
         
         <!-- API Settings Modal -->
         <div id="api-settings-modal" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="api-settings-heading">

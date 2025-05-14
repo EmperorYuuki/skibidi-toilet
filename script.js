@@ -106,6 +106,30 @@ const CONSTANTS = {
     },
     UI: {
         DEFAULT_STATUS_MESSAGE: 'Ready'
+    },
+    PROMPTS: { // Added new category for prompts
+        AI_GLOSSARY_GENERATION: `You are an expert in terminology extraction for translation.
+Given the following "Source Text", "Fandom Context", "Translator Notes", "Source Language", and "Target Language", identify key terms, names, or phrases that should be included in a glossary for consistent translation.
+For each term you identify, provide its direct translation into the "Target Language".
+
+Constraints:
+- Output each term and its translation on a new line, formatted as: "Original Term: Translated Term".
+- Only include terms that are non-trivial or specific to the context.
+- Do not include common words unless they have a very specific meaning in this context.
+- If no specific terms are found, output "No specific glossary terms identified."
+- Do not add any introductory or concluding remarks, just the list of terms or the "no terms" message.
+
+Source Language: {source_language}
+Target Language: {target_language}
+
+Fandom Context (if provided):
+{fandom_context}
+
+Translator Notes & Special Instructions (if provided):
+{notes}
+
+Source Text to Analyze:
+{source_text}`
     }
 };
 
@@ -181,24 +205,25 @@ async function loadTunnelConfig() {
 
 // --- Event Listeners ---
 document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLoaded async
-    console.info('DOM fully loaded and parsed. Initializing application...');
+    console.info('[DOMReady] DOM fully loaded and parsed. Initializing application...');
     try {
         // Load tunnel config first
-        console.log('[DOMReady] Attempting to load tunnel configuration...');
+        console.info('[DOMReady] Phase 1: Loading tunnel configuration...');
         await loadTunnelConfig(); // Await the loading of the tunnel config
 
         // Load saved state first
-        console.log('[DOMReady] Attempting to load from local storage...');
+        console.info('[DOMReady] Phase 2: Loading user data from local storage...');
         loadFromLocalStorage();
         
-        // Check if keys are present
-        console.log('[DOMReady] Checking API keys...');
-        checkApiKey();
+        // Check if keys are present and update UI accordingly
+        console.info('[DOMReady] Phase 3: Checking API keys and updating UI...');
+        checkApiKey(); // This also updates the status message initially
         
-        // Update pricing display
-        console.log('[DOMReady] Updating pricing display...');
+        // Update pricing display based on loaded model
+        console.info('[DOMReady] Phase 4: Updating model pricing display...');
         updatePricingDisplay();
 
+        console.info('[DOMReady] Phase 5: Attaching event listeners...');
         // Add event listeners for buttons with null checks
         if (translateBtn) translateBtn.addEventListener('click', handleTranslation);
         if (clearBtn) clearBtn.addEventListener('click', clearContextualFields); // Renamed function call
@@ -293,6 +318,12 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
                 }
             }
         });
+
+        // Event listener for AI Glossary Generation
+        const aiGenerateGlossaryBtn = document.getElementById('ai-generate-glossary-btn');
+        if (aiGenerateGlossaryBtn) {
+            aiGenerateGlossaryBtn.addEventListener('click', handleAIGlossaryGeneration);
+        }
 
         // Event listener for the new clear output area button
         if (clearOutputAreaBtn) {
@@ -440,67 +471,37 @@ function updateWordCount(textElement, countElement) {
     return { words, chars };
 }
 
+// Function to check if API key is present and update UI
 function checkApiKey() {
-    let selectedModelValue = '';
-    if (modelSelect) {
-        selectedModelValue = modelSelect.value;
-    }
-    console.log(`[APIKeyCheck] Checking API keys. Selected model: ${selectedModelValue || 'None'}`);
+    const selectedModel = modelSelect.value;
+    let apiKeyMissing = false;
+    let specificMessage = '';
 
-    let keyForSelectedModelMissing = false;
-    let missingKeyMessage = '';
-
-    if (selectedModelValue.startsWith(CONSTANTS.MODELS.GROK_PREFIX)) {
+    // Check Grok models
+    if (selectedModel.startsWith(CONSTANTS.MODELS.GROK_PREFIX)) {
         if (!grokApiKey || grokApiKey === CONSTANTS.API_KEY_PLACEHOLDERS.GROK) {
-            keyForSelectedModelMissing = true;
-            missingKeyMessage = 'Grok API key is not set or is a placeholder. Translation with Grok models will fail.';
+            apiKeyMissing = true;
+            specificMessage = 'Grok API key is not set. Configure in settings if using Grok.';
         }
-    } else if (selectedModelValue === CONSTANTS.MODELS.DEEPSEEK_CHAT) {
+    // Check DeepSeek model
+    } else if (selectedModel === CONSTANTS.MODELS.DEEPSEEK_CHAT) {
         if (!deepseekApiKey || deepseekApiKey === CONSTANTS.API_KEY_PLACEHOLDERS.DEEPSEEK) {
-            keyForSelectedModelMissing = true;
-            missingKeyMessage = 'DeepSeek API key is not set or is a placeholder. Translation with DeepSeek model will fail.';
+            apiKeyMissing = true;
+            specificMessage = 'DeepSeek API key is not set. Configure in settings if using DeepSeek.';
         }
-    } else if (selectedModelValue) { // A model is selected but doesn't match known types that have key checks
-        // This case implies a new model might have been added without updating key logic, or it needs no key.
-        // For now, assume it's okay if not Grok or DeepSeek for this specific check.
-        // updateStatus(`API key check not configured for model: ${selectedModelValue}`, CONSTANTS.STATUS_TYPES.INFO);
     }
 
-    if (keyForSelectedModelMissing) {
-        updateStatus(missingKeyMessage, CONSTANTS.STATUS_TYPES.ERROR, 0); // 0 timeout = persistent error
-        if (translateBtn && !translationInProgress) {
-            translateBtn.disabled = true;
-            translateBtn.title = missingKeyMessage; // Add tooltip explaining why it's disabled
-        }
-        console.warn(`[APIKeyCheck] Key missing for selected model '${selectedModelValue}'. Message: ${missingKeyMessage}`);
+    if (apiKeyMissing) {
+        // Update status message to warn about missing API key for the selected model
+        updateStatus(specificMessage, CONSTANTS.STATUS_TYPES.WARNING, 10000); // Longer timeout for API key warnings
+        if (translateBtn) translateBtn.disabled = true; // Disable translate button
     } else {
-        // If we passed the specific key check for the selected model, or no key check applies to it,
-        // ensure the translate button is enabled (if not already translating).
-        // Also, clear any persistent error status potentially set by this function.
-        if (translateBtn && !translationInProgress) {
-            translateBtn.disabled = false;
-            translateBtn.title = 'Translate the source text'; // Reset tooltip
+        // API key is present for the selected model, ensure translate button is enabled
+        if (translateBtn) translateBtn.disabled = false;
+        // If a previous API key warning was shown, clear it or set to default status
+        if (statusMessage.textContent.includes('API key is not set')) {
+            updateStatus(CONSTANTS.UI.DEFAULT_STATUS_MESSAGE, CONSTANTS.STATUS_TYPES.INFO);
         }
-        // Clear a persistent error if it was specifically set due to API key issues from this function.
-        // This is a bit simplistic; a more robust way would be to only clear if the current status message *is* the missingKeyMessage.
-        // For now, if keys are okay for the selected model, we assume any API key error status can be cleared to 'Ready' or a general info.
-        if (statusMessage && statusMessage.textContent.includes('API key is not set')) {
-             updateStatus(CONSTANTS.UI.DEFAULT_STATUS_MESSAGE, CONSTANTS.STATUS_TYPES.INFO);
-        }
-        console.log(`[APIKeyCheck] API key check passed for selected model '${selectedModelValue}' or no key required by current logic.`);
-    }
-
-    // General checks for any unset keys (these provide informational status updates)
-    if (!grokApiKey) {
-        updateStatus('Grok API key is not set. Configure in settings if using Grok models.', CONSTANTS.STATUS_TYPES.INFO, CONSTANTS.TIMEOUTS.STATUS_MESSAGE_DEFAULT + 2000);
-    } else if (grokApiKey === CONSTANTS.API_KEY_PLACEHOLDERS.GROK) {
-        updateStatus('Grok API key is a placeholder. Please update it in settings.', CONSTANTS.STATUS_TYPES.WARNING, CONSTANTS.TIMEOUTS.STATUS_MESSAGE_DEFAULT + 2000);
-    }
-
-    if (!deepseekApiKey) {
-        updateStatus('DeepSeek API key is not set. Configure in settings if using DeepSeek.', CONSTANTS.STATUS_TYPES.INFO, CONSTANTS.TIMEOUTS.STATUS_MESSAGE_DEFAULT + 2000);
-    } else if (deepseekApiKey === CONSTANTS.API_KEY_PLACEHOLDERS.DEEPSEEK) {
-        updateStatus('DeepSeek API key is a placeholder. Please update it in settings.', CONSTANTS.STATUS_TYPES.WARNING, CONSTANTS.TIMEOUTS.STATUS_MESSAGE_DEFAULT + 2000);
     }
 }
 
@@ -1997,15 +1998,43 @@ function renderGlossary() {
                 const termSpan = document.createElement('span');
                 termSpan.className = 'glossary-term-source-text';
                 termSpan.textContent = term;
-                
+                termSpan.contentEditable = "true"; // Make editable
+                termSpan.dataset.originalTerm = term; // Store original term for updates
+
                 const translationSpan = document.createElement('span');
                 translationSpan.className = 'glossary-term-target-text';
                 translationSpan.textContent = glossary[term];
+                translationSpan.contentEditable = "true"; // Make editable
+
+                // Event listener for saving changes on blur (when focus is lost)
+                [termSpan, translationSpan].forEach(span => {
+                    span.addEventListener('blur', (event) => {
+                        const listItem = event.target.closest('.glossary-item');
+                        const originalTermKey = listItem.querySelector('.glossary-term-source-text').dataset.originalTerm;
+                        const newSourceTerm = listItem.querySelector('.glossary-term-source-text').textContent.trim();
+                        const newTargetTranslation = listItem.querySelector('.glossary-term-target-text').textContent.trim();
+                        
+                        if (!newSourceTerm || !newTargetTranslation) {
+                            updateStatus("Glossary terms cannot be empty. Reverting.", CONSTANTS.STATUS_TYPES.WARNING);
+                            // Revert to original if one part is empty
+                            const currentGlossary = getGlossary();
+                            listItem.querySelector('.glossary-term-source-text').textContent = originalTermKey;
+                            listItem.querySelector('.glossary-term-target-text').textContent = currentGlossary[originalTermKey] || '';
+                            return;
+                        }
+
+                        handleEditGlossaryTerm(originalTermKey, newSourceTerm, newTargetTranslation);
+                        // Update dataset.originalTerm if source term itself was changed
+                        if (originalTermKey !== newSourceTerm) {
+                             listItem.querySelector('.glossary-term-source-text').dataset.originalTerm = newSourceTerm;
+                        }
+                    });
+                });
                 
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'delete-glossary-term-btn action-btn danger-btn'; // Reusing existing button styles
                 deleteBtn.innerHTML = '<i class="fas fa-trash-alt"></i>';
-                deleteBtn.dataset.term = term;
+                deleteBtn.dataset.term = term; // Keep using original term for delete key
                 deleteBtn.title = 'Delete term';
 
                 li.appendChild(termSpan);
@@ -2059,13 +2088,133 @@ function handleDeleteGlossaryTerm(termToDelete) {
     if (glossary.hasOwnProperty(termToDelete)) {
         delete glossary[termToDelete];
         saveGlossary(glossary);
-        renderGlossary();
+        renderGlossary(); // Re-render to reflect changes
         updateStatus(`Glossary term "${termToDelete}" deleted.`, CONSTANTS.STATUS_TYPES.SUCCESS);
     } else {
         updateStatus(`Error: Term "${termToDelete}" not found in glossary.`, CONSTANTS.STATUS_TYPES.ERROR);
     }
 }
-// --- End of Glossary Management Functions ---
+
+// New function to handle editing a glossary term
+function handleEditGlossaryTerm(originalSourceTerm, newSourceTerm, newTargetTranslation) {
+    const glossary = getGlossary();
+
+    if (!newSourceTerm.trim() || !newTargetTranslation.trim()) {
+        updateStatus("Glossary source and target terms cannot be empty.", CONSTANTS.STATUS_TYPES.WARNING);
+        renderGlossary(); // Re-render to revert to original values if validation fails
+        return;
+    }
+
+    // If the source term has changed, we need to delete the old entry and add a new one
+    // Otherwise, just update the translation for the existing source term
+    if (originalSourceTerm !== newSourceTerm) {
+        if (glossary.hasOwnProperty(newSourceTerm)) {
+            if (!confirm(`The term "${newSourceTerm}" already exists. Overwrite its translation?`)) {
+                renderGlossary(); // Re-render to revert changes
+                return;
+            }
+        }
+        delete glossary[originalSourceTerm];
+        console.log(`[GlossaryEdit] Original term "${originalSourceTerm}" deleted due to rename to "${newSourceTerm}".`);
+    }
+    
+    glossary[newSourceTerm] = newTargetTranslation;
+    saveGlossary(glossary);
+    // No renderGlossary() here as blur event might cause issues. 
+    // The textContent is already updated. We might need a full re-render if keys change significantly.
+    // For now, direct DOM update is done by contentEditable.
+    // Let's re-render to ensure dataset.originalTerm on delete buttons is correct IF the term name changed
+    if (originalSourceTerm !== newSourceTerm) {
+        renderGlossary();
+    }
+    updateStatus(`Glossary term "${newSourceTerm}" updated.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+    console.log(`[GlossaryEdit] Term "${originalSourceTerm}" updated to "${newSourceTerm} : ${newTargetTranslation}".`);
+}
+
+// --- AI Glossary Generation Function ---
+async function handleAIGlossaryGeneration() {
+    console.info('[AIGlossary] Initiating AI glossary generation...');
+    if (!translationBox || !modelSelect) {
+        updateStatus("Cannot generate glossary: Missing required elements (source text or model select).", CONSTANTS.STATUS_TYPES.ERROR);
+        return;
+    }
+
+    const sourceText = translationBox.value.trim();
+    const fandomContext = fandomBox.value.trim() || CONSTANTS.DEFAULT_VALUES.FANDOM_CONTEXT;
+    const notes = notesBox.value.trim() || CONSTANTS.DEFAULT_VALUES.NOTES;
+    const selectedModel = modelSelect.value;
+    const sourceLanguage = sourceLanguageInput.value.trim() || CONSTANTS.DEFAULT_VALUES.SOURCE_LANGUAGE;
+    const targetLanguage = targetLanguageInput ? (targetLanguageInput.textContent || 'English') : 'English'; // Assuming English default
+    const temperature = 0.3; // Lower temperature for more factual extraction
+
+    if (!sourceText) {
+        updateStatus('Please enter source text to generate glossary from.', CONSTANTS.STATUS_TYPES.WARNING);
+        console.warn('[AIGlossary] No source text provided.');
+        return;
+    }
+
+    updateStatus('Generating glossary with AI...', CONSTANTS.STATUS_TYPES.PROCESSING);
+    const aiGenerateGlossaryBtn = document.getElementById('ai-generate-glossary-btn');
+    if (aiGenerateGlossaryBtn) aiGenerateGlossaryBtn.disabled = true;
+
+    const prompt = CONSTANTS.PROMPTS.AI_GLOSSARY_GENERATION
+        .replace(/{source_language}/g, sourceLanguage)
+        .replace(/{target_language}/g, targetLanguage)
+        .replace(/{fandom_context}/g, fandomContext)
+        .replace(/{notes}/g, notes)
+        .replace(/{source_text}/g, sourceText);
+
+    try {
+        const aiResponse = await getTranslation(prompt, selectedModel, temperature, false, null, abortController ? abortController.signal : null);
+        
+        if (!aiResponse || aiResponse.trim().toLowerCase() === "no specific glossary terms identified.") {
+            updateStatus("AI did not identify any specific glossary terms.", CONSTANTS.STATUS_TYPES.INFO);
+            console.info('[AIGlossary] AI found no terms.');
+            return; // Added return here
+        }
+
+        const lines = aiResponse.trim().split('\n'); // Simpler split for lines, assuming AI follows \n for newlines.
+
+        let termsAddedCount = 0;
+        const currentGlossary = getGlossary();
+
+        for (const line of lines) {
+            const parts = line.split(':');
+            if (parts.length >= 2) {
+                const sourceTerm = parts[0].trim();
+                const targetTranslation = parts.slice(1).join(':').trim(); // Join back in case translation has colons
+
+                if (sourceTerm && targetTranslation) {
+                    if (currentGlossary.hasOwnProperty(sourceTerm) && currentGlossary[sourceTerm] !== targetTranslation) {
+                        // Maybe ask user if they want to overwrite? For now, AI suggestions won't overwrite existing different translations.
+                        console.warn(`[AIGlossary] Term "${sourceTerm}" already exists with a different translation. AI suggestion skipped.`);
+                        continue;
+                    }
+                    currentGlossary[sourceTerm] = targetTranslation;
+                    termsAddedCount++;
+                }
+            }
+        }
+
+        if (termsAddedCount > 0) {
+            saveGlossary(currentGlossary);
+            renderGlossary();
+            updateStatus(`AI generated and added ${termsAddedCount} glossary term(s).`, CONSTANTS.STATUS_TYPES.SUCCESS);
+            console.info(`[AIGlossary] Added ${termsAddedCount} terms from AI.`);
+        } else {
+            updateStatus("AI response could not be parsed into glossary terms, or no new terms were found.", CONSTANTS.STATUS_TYPES.INFO);
+            console.info('[AIGlossary] No new terms added after parsing AI response.');
+        }
+
+    } catch (error) {
+        console.error('[AIGlossary] Error generating glossary:', error);
+        updateStatus('Error generating glossary with AI: ' + error.message, CONSTANTS.STATUS_TYPES.ERROR);
+    } finally {
+        if (aiGenerateGlossaryBtn) aiGenerateGlossaryBtn.disabled = false;
+        console.log('[AIGlossary] AI glossary generation finished (finally block).');
+    }
+}
+// --- End of AI Glossary Generation Function ---
 
 // --- Token Count and Cost Estimation Functions ---
 async function updateTokenCountAndCost() {
