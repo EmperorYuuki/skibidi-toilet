@@ -13,53 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Default chunk sizes
     const DEFAULT_GROK_TOKENS = 22000; // For Grok models
     const DEFAULT_DEEPSEEK_TOKENS = 6000; // For DeepSeek models
-    const TOKENIZER_SERVER_URL = getTokenizerUrl(); // Dynamically get the tokenizer URL
-    
-    // Function to get the tokenizer URL from config or default to localhost
-    function getTokenizerUrl() {
-        try {
-            // Try to fetch from tunnel_config.json first
-            const tunnelConfigUrl = '../tunnel_config.json';
-            const cachedConfigKey = 'tokenizer_tunnel_url';
-            const cachedUrl = localStorage.getItem(cachedConfigKey);
-            
-            // First check if we have a cached URL
-            if (cachedUrl) {
-                console.log(`[Chunker] Using cached tokenizer tunnel URL: ${cachedUrl}`);
-                // We'll still try to fetch the latest in the background
-                fetch(tunnelConfigUrl)
-                    .then(response => response.json())
-                    .then(config => {
-                        if (config && config.tokenizer_url) {
-                            console.log(`[Chunker] Updated tokenizer tunnel URL: ${config.tokenizer_url}`);
-                            localStorage.setItem(cachedConfigKey, config.tokenizer_url);
-                        }
-                    })
-                    .catch(err => console.warn(`[Chunker] Could not fetch latest tunnel config: ${err.message}`));
-                return cachedUrl;
-            }
-            
-            // If no cached URL, check for a tunneled URL synchronously using a fake XHR
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', tunnelConfigUrl, false); // Synchronous request
-            xhr.send(null);
-            
-            if (xhr.status === 200) {
-                const config = JSON.parse(xhr.responseText);
-                if (config && config.tokenizer_url) {
-                    console.log(`[Chunker] Using tokenizer tunnel URL: ${config.tokenizer_url}`);
-                    localStorage.setItem(cachedConfigKey, config.tokenizer_url);
-                    return config.tokenizer_url;
-                }
-            }
-        } catch (error) {
-            console.warn(`[Chunker] Error getting tokenizer URL: ${error.message}`);
-        }
-        
-        // Default to localhost if no tunneled URL found
-        console.log('[Chunker] Using default localhost tokenizer URL');
-        return 'http://localhost:5000';
-    }
+    const TOKENIZER_SERVER_URL = 'http://localhost:5000';
     
     // Check tokenizer server status on page load
     checkTokenizerStatus();
@@ -173,7 +127,6 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             // Attempt to use the tokenizer server for chunking
             console.log(`[Chunker] Attempting to use tokenizer server for ${modelType} model with max_tokens: ${maxTokens}`);
-            console.log(`[Chunker] Using tokenizer URL: ${TOKENIZER_SERVER_URL}`);
             const healthResponse = await fetch(`${TOKENIZER_SERVER_URL}/health`, { method: 'GET' });
             if (!healthResponse.ok) {
                 throw new Error('Tokenizer server not available or health check failed');

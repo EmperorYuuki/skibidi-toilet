@@ -76,8 +76,8 @@ const CONSTANTS = {
         TEMPERATURE: 'temperature',
         GROQ_API_KEY: 'groqApiKey',
         DEEPSEEK_API_KEY: 'deepseekApiKey',
-        SAVED_PROMPTS: 'fanficTranslatorSavedPrompts', // New key for saved prompts
-        TOKENIZER_TUNNEL_URL: 'tokenizer_tunnel_url' // Store the tokenizer tunnel URL
+        SAVED_PROMPTS: 'fanficTranslatorSavedPrompts',
+        INTER_CHUNK_SUMMARY_ENABLED: 'interChunkSummaryEnabled' // New key
         // DARK_MODE: 'darkMode' // Not actively used for setting, but was a key
     },
     API_KEY_PLACEHOLDERS: {
@@ -93,59 +93,13 @@ const CONSTANTS = {
     }
 };
 
-// Get the tokenizer URL dynamically
-function getTokenizerUrl() {
-    try {
-        // Try to fetch from tunnel_config.json first
-        const tunnelConfigUrl = 'tunnel_config.json';
-        const cachedConfigKey = CONSTANTS.LOCAL_STORAGE_KEYS.TOKENIZER_TUNNEL_URL;
-        const cachedUrl = localStorage.getItem(cachedConfigKey);
-        
-        // First check if we have a cached URL
-        if (cachedUrl) {
-            console.log(`Using cached tokenizer tunnel URL: ${cachedUrl}`);
-            // We'll still try to fetch the latest in the background
-            fetch(tunnelConfigUrl)
-                .then(response => response.json())
-                .then(config => {
-                    if (config && config.tokenizer_url) {
-                        console.log(`Updated tokenizer tunnel URL: ${config.tokenizer_url}`);
-                        localStorage.setItem(cachedConfigKey, config.tokenizer_url);
-                    }
-                })
-                .catch(err => console.warn(`Could not fetch latest tunnel config: ${err.message}`));
-            return cachedUrl;
-        }
-        
-        // If no cached URL, check for a tunneled URL synchronously using a fake XHR
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', tunnelConfigUrl, false); // Synchronous request
-        xhr.send(null);
-        
-        if (xhr.status === 200) {
-            const config = JSON.parse(xhr.responseText);
-            if (config && config.tokenizer_url) {
-                console.log(`Using tokenizer tunnel URL: ${config.tokenizer_url}`);
-                localStorage.setItem(cachedConfigKey, config.tokenizer_url);
-                return config.tokenizer_url;
-            }
-        }
-    } catch (error) {
-        console.warn(`Error getting tokenizer URL: ${error.message}`);
-    }
-    
-    // Default to localhost if no tunneled URL found
-    console.log('Using default localhost tokenizer URL');
-    return 'http://localhost:5000';
-}
-
-// Define the tokenizer server URL
-const TOKENIZER_SERVER_URL = getTokenizerUrl();
-
 // API Key (Replace with secure handling in production)
 // These will be populated from localStorage by loadFromLocalStorage
 let groqApiKey = ''; 
 let deepseekApiKey = '';
+
+// Add a global variable for the tokenizer server URL
+let tokenizerServerUrl = null; // Default to null, to be set by config
 
 // --- Default Prompt Template ---
 const defaultPromptTemplate = `You are an expert fanfiction translator. Your task is to completely and accurately translate the following work from {source_language} into {target_language}, ensuring that all chapters are translated in full and without interruption until the entire text is complete.
@@ -189,10 +143,37 @@ const modelPricing = {
     'deepseek-chat':            { input: '$0.27', completion: '$1.10', context: '64k' }, // Standard Price (Cache Miss)
 };
 
+// Function to load tunnel configuration
+async function loadTunnelConfig() {
+    try {
+        const response = await fetch('tunnel_config.json');
+        if (response.ok) {
+            const config = await response.json();
+            if (config && config.tokenizer_url) {
+                tokenizerServerUrl = config.tokenizer_url;
+                console.log(`[Config] Using tokenizer server URL from tunnel_config.json: ${tokenizerServerUrl}`);
+            } else {
+                tokenizerServerUrl = null; // Ensure it's null if key is missing
+                console.warn('[Config] tunnel_config.json found but tokenizer_url is missing or empty.');
+            }
+        } else {
+            tokenizerServerUrl = null; // Ensure it's null if file not found
+            console.warn('[Config] tunnel_config.json not found or not accessible.');
+        }
+    } catch (error) {
+        tokenizerServerUrl = null; // Ensure it's null on error
+        console.error('[Config] Error loading tunnel_config.json:', error);
+    }
+}
+
 // --- Event Listeners ---
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLoaded async
     console.info('DOM fully loaded and parsed. Initializing application...');
     try {
+        // Load tunnel config first
+        console.log('[DOMReady] Attempting to load tunnel configuration...');
+        await loadTunnelConfig(); // Await the loading of the tunnel config
+
         // Load saved state first
         console.log('[DOMReady] Attempting to load from local storage...');
         loadFromLocalStorage();
@@ -207,7 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Add event listeners for buttons with null checks
         if (translateBtn) translateBtn.addEventListener('click', handleTranslation);
-        if (clearBtn) clearBtn.addEventListener('click', clearAllFields);
+        if (clearBtn) clearBtn.addEventListener('click', clearContextualFields); // Renamed function call
         if (saveAllBtn) saveAllBtn.addEventListener('click', saveAllAsZip);
         if (modelSelect) {
             modelSelect.addEventListener('change', () => {
@@ -296,7 +277,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Add null checks before adding event listeners to prevent errors
 if (promptBox) promptBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT, promptBox.value));
-if (fandomBox) fandomBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT, fandomBox.value));
+// The direct listener for fandomBox will be removed as it's handled by the debounced textAreasForAutoSave loop.
+// if (fandomBox) fandomBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT, fandomBox.value));
 if (notesBox) notesBox.addEventListener('input', () => saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.NOTES_CONTENT, notesBox.value));
 // No need for outputBox listener, saved after translation completes or when cleared
 
@@ -523,21 +505,19 @@ function updateTranslationState(isTranslating) {
 
 // Helper function to count words, more accurately for CJK-like languages
 function getWordCount(text) {
-    if (!text) return 0;
-    // Simple heuristic: if text contains Chinese characters, or generally lacks spaces,
-    // count characters as words. Otherwise, split by space.
+    if (!text || text.trim() === '') return 0;
     const chineseRegex = /[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/; // Basic CJK, Full-width punctuation
     const hasChinese = chineseRegex.test(text);
-    const hasSpaces = /\s/.test(text.trim());
 
-    if (hasChinese && !hasSpaces) { // Primarily Chinese text without many spaces
-        return text.replace(/\s+/g, '').length; // Count non-whitespace characters
-    } else if (hasChinese && hasSpaces) {
-         // Mixed content or Chinese with spaces
-         // For simplicity, if Chinese chars are present, use character count as a proxy
-        return text.length; // Fallback to char count if CJK detected
+    if (hasChinese) {
+        // For text with Chinese characters, count non-whitespace characters.
+        // This treats each Chinese character as a word and ignores spaces.
+        return text.replace(/\s+/g, '').length;
+    } else {
+        // For non-Chinese text, split by spaces and filter out empty strings
+        // that might result from multiple spaces.
+        return text.trim().split(/\s+/).filter(word => word.length > 0).length;
     }
-    return text.trim().split(/\s+/).length; // Default for space-separated languages
 }
 
 // Function to split text into chunks
@@ -545,10 +525,9 @@ async function createTextChunks(text, modelName) {
     console.log(`[Chunker] Creating text chunks for model: ${modelName}`);
     const DEFAULT_GROK_TOKENS = 22000; // For Grok models
     const DEFAULT_DEEPSEEK_TOKENS = 6000; // For DeepSeek models
-    // Use the global TOKENIZER_SERVER_URL constant instead of hardcoded value
-    // const tokenizerServerUrl = 'http://localhost:5000'; // URL to the Flask tokenizer server
+    let chunks = []; // Ensure chunks is declared here
+    let usedTokenizerServer = false;
 
-    let chunks = [];
     let maxTokens;
 
     if (modelName.startsWith(CONSTANTS.MODELS.GROQ_PREFIX)) {
@@ -559,70 +538,78 @@ async function createTextChunks(text, modelName) {
         console.log(`[Chunker] Using DeepSeek model, setting max tokens to ${maxTokens}`);
     } else {
         console.error('[Chunker] Unknown model type for chunking:', modelName);
-        return [text.trim()].filter(chunk => chunk.length > 0);
+        // For unknown models, return the original text as a single chunk if it's not empty.
+        const trimmedText = text.trim();
+        return trimmedText ? [trimmedText] : [];
     }
 
-    try {
-        // Attempt to use the tokenizer server for chunking
-        console.log(`[Chunker] Attempting to use tokenizer server at ${TOKENIZER_SERVER_URL} with max_tokens: ${maxTokens}`);
-        const healthResponse = await fetch(`${TOKENIZER_SERVER_URL}/health`, { 
-            method: 'GET' 
-        }).catch(error => {
-            console.error('[Chunker] Error connecting to tokenizer server:', error);
-            throw new Error('Tokenizer server not reachable');
-        });
-
-        if (!healthResponse.ok) {
-            throw new Error(`Tokenizer server health check failed: ${healthResponse.status}`);
-        }
-
-        // If server is available, use it for chunking
-        console.log('[Chunker] Tokenizer server is available. Requesting chunking...');
-        const chunkResponse = await fetch(`${TOKENIZER_SERVER_URL}/chunk`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                text: text,
-                max_tokens: maxTokens
-            })
-        });
-
-        if (!chunkResponse.ok) {
-            const errorData = await chunkResponse.json().catch(() => ({ error: 'Server returned non-OK status and failed to parse error JSON.' }));
-            throw new Error(`Server chunking failed: ${chunkResponse.status} - ${errorData.error || 'Unknown server error'}`);
-    }
-
-        const chunkData = await chunkResponse.json();
-        chunks = chunkData.chunks;
-        
-        // Debug server response
-        console.log("[Chunker] Server response summary:", {
-            chunks_count: chunkData.chunk_count,
-            max_tokens_setting: chunkData.max_tokens_setting,
-            actual_tokens: chunkData.actual_total_tokens_in_chunks
-        });
-        console.log(`[Chunker] Received ${chunks.length} chunks from server`);
-        
-        if (chunks.length > 0) {
-            chunks.forEach((chunk, i) => {
-                console.log(`[Chunker] Chunk ${i+1} preview: ${chunk.substring(0, 50)}... (${chunk.length} chars)`);
+    if (tokenizerServerUrl) { // Attempt to use server only if URL is configured
+        try {
+            // Attempt to use the tokenizer server for chunking
+            console.log(`[Chunker] Attempting to use tokenizer server at ${tokenizerServerUrl} with max_tokens: ${maxTokens}`);
+            const healthResponse = await fetch(`${tokenizerServerUrl}/health`, { 
+                method: 'GET' 
+            }).catch(error => {
+                console.error('[Chunker] Error connecting to tokenizer server (during health check):', error);
+                throw new Error('Tokenizer server not reachable or health check fetch failed');
             });
-        }
 
-    } catch (error) {
-        console.error('[Chunker] Tokenizer server error:', error.message);
+            if (!healthResponse.ok) {
+                throw new Error(`Tokenizer server health check failed: ${healthResponse.status} ${await healthResponse.text()}`);
+            }
+
+            // If server is available, use it for chunking
+            console.log('[Chunker] Tokenizer server is available. Requesting chunking...');
+            const chunkResponse = await fetch(`${tokenizerServerUrl}/chunk`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    text: text,
+                    max_tokens: maxTokens
+                })
+            });
+
+            if (!chunkResponse.ok) {
+                const errorData = await chunkResponse.json().catch(() => ({ error: 'Server returned non-OK status and failed to parse error JSON.' }));
+                throw new Error(`Server chunking failed: ${chunkResponse.status} - ${errorData.error || 'Unknown server error'}`);
+            }
+
+            const chunkData = await chunkResponse.json();
+            chunks = chunkData.chunks; // Assign to the function-scoped chunks variable
+            usedTokenizerServer = true;
+            
+            console.log("[Chunker] Server response summary:", {
+                chunks_count: chunkData.chunk_count,
+                max_tokens_setting: chunkData.max_tokens_setting,
+                actual_tokens: chunkData.actual_total_tokens_in_chunks
+            });
+            console.log(`[Chunker] Received ${chunks.length} chunks from server`);
+            
+            if (chunks.length > 0) {
+                chunks.forEach((chunk, i) => {
+                    console.log(`[Chunker] Chunk ${i+1} preview: ${chunk.substring(0, 50)}... (${chunk.length} chars)`);
+                });
+            }
+        } catch (error) {
+            console.error('[Chunker] Tokenizer server error (URL was configured, or health/chunk call failed):', error.message);
+            // usedTokenizerServer remains false, will fall through to character-based chunking.
+        }
+    } else {
+        console.warn('[Chunker] Tokenizer server URL not configured. Will use character-based fallback.');
+    }
+
+    if (!usedTokenizerServer) {
         console.warn('[Chunker] Falling back to character-based chunking. This is a rough approximation!');
         
         // Fallback: Use character-based approximation
+        chunks = []; // Ensure chunks is reset for fallback logic
         const CHARS_PER_TOKEN_ESTIMATE = 4; // General estimate
         const maxCharsFallback = maxTokens * CHARS_PER_TOKEN_ESTIMATE;
         let currentChunk = '';
-        chunks = []; // Reset chunks for fallback logic
         let accumulatedCharsInCurrentChunk = 0;
 
-        // Split by one or more newlines to treat lines as paragraphs
         const textLines = text.split(/\r?\n/);
         let paragraphBuffer = [];
 
@@ -635,41 +622,38 @@ async function createTextChunks(text, modelName) {
         }
 
         function addParagraphToChunk(pText) {
-            if (currentChunk.length > 0) { // If current chunk has content, add paragraph separator
-                currentChunk += '\n\n'; // Use double newline to reconstruct paragraph structure
-                accumulatedCharsInCurrentChunk += 2; // Account for the separator
+            if (currentChunk.length > 0) { 
+                currentChunk += '\n\n'; 
+                accumulatedCharsInCurrentChunk += 2; 
             }
             currentChunk += pText;
             accumulatedCharsInCurrentChunk += pText.length;
         }
 
         for (const line of textLines) {
-            if (line.trim() === '') { // Empty line signifies a paragraph break
+            if (line.trim() === '') { 
                 if (paragraphBuffer.length > 0) {
                     let currentParagraph = paragraphBuffer.join('\n');
                     paragraphBuffer = [];
 
-                    // Process this paragraph
                     if (accumulatedCharsInCurrentChunk + currentParagraph.length + (currentChunk.length > 0 ? 2 : 0) > maxCharsFallback && accumulatedCharsInCurrentChunk > 0) {
                         finalizeCurrentChunk();
                     }
 
                     if (currentParagraph.length > maxCharsFallback && accumulatedCharsInCurrentChunk === 0) {
-                        // Paragraph itself is too big and chunk is empty
                         let pToSplit = currentParagraph;
                         while (pToSplit.length > 0) {
                             let subP = pToSplit.substring(0, maxCharsFallback);
-                            chunks.push(subP.trim()); // Add as a new chunk directly
+                            chunks.push(subP.trim()); 
                             pToSplit = pToSplit.substring(subP.length);
                         }
                     } else if (currentParagraph.length + accumulatedCharsInCurrentChunk + (currentChunk.length > 0 ? 2:0) <= maxCharsFallback) {
                          addParagraphToChunk(currentParagraph);
                     } else {
-                         // Paragraph won't fit, finalize current and start new with this one (if it fits alone)
                          finalizeCurrentChunk();
                          if (currentParagraph.length <= maxCharsFallback) {
                              addParagraphToChunk(currentParagraph);
-                         } else { // Still too big, split it
+                         } else { 
                             let pToSplit = currentParagraph;
                             while (pToSplit.length > 0) {
                                 let subP = pToSplit.substring(0, maxCharsFallback);
@@ -684,7 +668,6 @@ async function createTextChunks(text, modelName) {
             }
         }
         
-        // Process any remaining text in paragraphBuffer
         if (paragraphBuffer.length > 0) {
             let currentParagraph = paragraphBuffer.join('\n');
             if (accumulatedCharsInCurrentChunk + currentParagraph.length + (currentChunk.length > 0 ? 2 : 0) > maxCharsFallback && accumulatedCharsInCurrentChunk > 0) {
@@ -714,7 +697,7 @@ async function createTextChunks(text, modelName) {
             }
         }
 
-        finalizeCurrentChunk(); // Add any remaining currentChunk content
+        finalizeCurrentChunk(); 
         console.log(`[Chunker] Fallback created ${chunks.length} chunks based on ~${maxCharsFallback} chars.`);
     }
     
@@ -800,6 +783,9 @@ async function handleTranslation() {
                                      </div>`;
         
         let chunkSummaries = []; // To store summaries for inter-chunk context (future feature)
+        // Check if inter-chunk summaries are enabled
+        const interChunkSummaryToggle = document.getElementById('inter-chunk-summary-toggle');
+        const enableInterChunkSummaries = interChunkSummaryToggle ? interChunkSummaryToggle.checked : false;
 
         for (let i = 0; i < textChunks.length; i++) {
             if (abortController.signal.aborted) {
@@ -908,9 +894,22 @@ async function handleTranslation() {
                     if (currentOutputCounter && outputBox) updateWordCount(outputBox, currentOutputCounter);
                 }
 
-                // Future: Generate and store summary for inter-chunk context
-                // This is where the future generateChunkSummary function would be called
-                // chunkSummaries.push(await generateChunkSummary(translation));
+                // Generate and store summary for inter-chunk context
+                if (enableInterChunkSummaries && textChunks.length > 1 && i < textChunks.length -1) { // Only generate if enabled and more chunks to come
+                    try {
+                        console.log(`[Translate Chunk ${chunkNumber}] Generating summary for inter-chunk context...`);
+                        const chunkSummary = await generateChunkSummary(translation, selectedModel, temperature);
+                        if (chunkSummary) {
+                            chunkSummaries.push(chunkSummary);
+                            console.log(`[Translate Chunk ${chunkNumber}] Inter-chunk summary generated and stored.`);
+                        } else {
+                            console.warn(`[Translate Chunk ${chunkNumber}] Inter-chunk summary was empty.`);
+                        }
+                    } catch (summaryError) {
+                        console.error(`[Translate Chunk ${chunkNumber}] Failed to generate inter-chunk summary:`, summaryError);
+                        // Continue without this summary
+                    }
+                }
 
             } catch (chunkError) {
                 overallSuccess = false;
@@ -965,6 +964,40 @@ async function handleTranslation() {
             if (generateSummaryBtn) generateSummaryBtn.disabled = true; // Keep disabled if batch had issues or was stopped
         }
         abortController = null; // Clear the controller
+    }
+}
+
+// New function to generate a summary for a given chunk of text
+async function generateChunkSummary(textToSummarize, model, originalTemperature) {
+    if (!textToSummarize || !textToSummarize.trim()) {
+        console.warn('[ChunkSummary] No text provided to summarize for inter-chunk context.');
+        return null;
+    }
+
+    console.log(`[ChunkSummary] Requesting summary for chunk. Model: ${model}`);
+    const summaryPrompt = `Based on the following text, provide a very concise summary (1-2 sentences) focusing on key events, characters, and information that would be essential for maintaining context if translating the *next* part of this story. Output only the summary itself:
+
+Text:
+${textToSummarize}`;
+    
+    const summaryTemperature = Math.max(0.1, Math.min(originalTemperature - 0.2, 0.5)); // Lower temp for summary, but not too low
+
+    try {
+        // Using the existing getTranslation function for the API call
+        const summary = await getTranslation(summaryPrompt, model, summaryTemperature, false, null, abortController ? abortController.signal : null);
+        if (summary && summary.trim()) {
+            return summary.trim();
+        } else {
+            console.warn('[ChunkSummary] Received empty summary from AI.');
+            return null;
+        }
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            console.info('[ChunkSummary] Summary generation aborted.');
+        } else {
+            console.error('[ChunkSummary] Error during inter-chunk summary generation:', error);
+        }
+        return null; // Return null if summarization fails or is aborted
     }
 }
 
@@ -1178,19 +1211,22 @@ async function getTranslation(prompt, model, temperature, stream = false, update
 // Helper function to handle API errors
 async function handleApiError(response, modelName = 'selected') { // Added modelName for context
     let errorData;
+    let errorMessage;
     try {
         errorData = await response.json();
+        errorMessage = errorData?.error?.message || errorData?.detail || response.statusText || 'Unknown API error';
     } catch (e) {
         // If parsing JSON fails, use the raw text
-        const rawText = await response.text();
-        updateStatus(`API Error (${response.status}) with ${modelName} model: ${rawText || response.statusText}`, CONSTANTS.STATUS_TYPES.ERROR, 10000);
-        console.error('API Error (raw text):', rawText);
-        return;
+        const rawText = await response.text().catch(() => response.statusText); // Fallback for text() error
+        errorMessage = rawText || response.statusText || 'Unknown error and failed to get details';
+        updateStatus(`API Error (${response.status}) with ${modelName} model. Response: ${errorMessage}`, CONSTANTS.STATUS_TYPES.ERROR, 10000);
+        console.error(`API Error (${response.status}) with ${modelName} model. Raw response:`, rawText);
+        throw new Error(`API Error (${response.status}) with ${modelName} model: ${errorMessage}`); // Throw after logging
     }
     
-    const errorMessage = errorData?.error?.message || errorData?.detail || response.statusText || 'Unknown API error';
     updateStatus(`API Error (${response.status}) with ${modelName} model: ${errorMessage}`, CONSTANTS.STATUS_TYPES.ERROR, 10000);
-    console.error('API Error:', errorData);
+    console.error('API Error Data:', errorData);
+    throw new Error(`API Error (${response.status}) with ${modelName} model: ${errorMessage}`); // Ensure an error is thrown
 }
 
 // Clear specific field, its local storage, and optionally update its word count
@@ -1221,8 +1257,8 @@ function clearSpecificField(elementId, storageKey, wordCountElementId = null) {
 }
 
 // Clear Prompt, Fandom, Notes fields
-function clearAllFields() {
-    console.info('[ClearAll] Clearing prompt, fandom, and notes fields.');
+function clearContextualFields() { // Renamed function
+    console.info('[ClearContextual] Clearing prompt, fandom, and notes fields.');
     promptBox.value = '';
     fandomBox.value = '';
     notesBox.value = '';
@@ -1235,7 +1271,8 @@ function clearAllFields() {
     // For now, keep model, temp, source lang, theme
     promptBox.value = defaultPromptTemplate; // Reset prompt to default
     saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT, defaultPromptTemplate);
-    console.log('[ClearAllFields] Prompt, Fandom, Notes fields cleared and prompt reset to default.');
+    // Corrected console log to match the function name
+    console.log('[ClearContextual] Prompt, Fandom, Notes fields cleared and prompt reset to default.'); 
 
     updateStatus('Prompt, Fandom, and Notes fields cleared.', CONSTANTS.STATUS_TYPES.INFO);
 }
@@ -1313,7 +1350,7 @@ async function saveAllAsZip() {
         zip.file("prompt_template.txt", promptBox.value);
         zip.file("fandom_context.txt", fandomBox.value);
         zip.file("notes.txt", notesBox.value);
-        zip.file("translated_output.txt", outputBox.value);
+        zip.file("translated_output.txt", outputBox.innerText); // Changed from outputBox.value
         // Include settings
         const settings = {
             model: modelSelect.value,
@@ -1453,6 +1490,10 @@ function loadFromLocalStorage() {
     const savedModel = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.SELECTED_MODEL);
     if (modelSelect && savedModel) modelSelect.value = savedModel;
 
+    const savedInterChunkSummaryEnabled = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.INTER_CHUNK_SUMMARY_ENABLED);
+    const interChunkSummaryToggle = document.getElementById('inter-chunk-summary-toggle');
+    if (interChunkSummaryToggle) interChunkSummaryToggle.checked = savedInterChunkSummaryEnabled === 'true'; // Default to false if not found
+
     const savedSourceLang = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.SOURCE_LANGUAGE);
     if (sourceLanguageInput) {
         sourceLanguageInput.value = savedSourceLang || CONSTANTS.DEFAULT_VALUES.SOURCE_LANGUAGE;
@@ -1561,14 +1602,16 @@ function updateStatus(message, type = CONSTANTS.STATUS_TYPES.INFO, timeout = CON
 }
 
 // Automatically save changes in text areas to localStorage after a short delay
-const textAreasForAutoSave = [translationBox, promptBox, notesBox]; // Output is saved after translation
+// Ensure fandomBox is part of this array for debounced auto-save
+const textAreasForAutoSave = [translationBox, promptBox, notesBox, fandomBox]; 
 let saveTimeout;
 
 // Map textareas to their storage keys for auto-save
 const textAreaStorageMap = {
     'translation-box': CONSTANTS.LOCAL_STORAGE_KEYS.TRANSLATION_CONTENT,
     'prompt-box': CONSTANTS.LOCAL_STORAGE_KEYS.PROMPT_CONTENT,
-    'notes-box': CONSTANTS.LOCAL_STORAGE_KEYS.NOTES_CONTENT
+    'notes-box': CONSTANTS.LOCAL_STORAGE_KEYS.NOTES_CONTENT,
+    'fandom-box': CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT 
 };
 
 textAreasForAutoSave.forEach(textarea => {
@@ -1585,12 +1628,7 @@ textAreasForAutoSave.forEach(textarea => {
     }
 });
 
-// Save fandom content separately now
-function saveFandomContent() {
-    if (fandomBox) { // Add null check
-        localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.FANDOM_CONTENT, fandomBox.value);
-    }
-}
+// The redundant saveFandomContent() function was removed in a previous step.
 
 // --- Prompt Template Management Functions ---
 function getSavedPrompts() {
@@ -1708,3 +1746,11 @@ function handleDeleteSelectedPrompt() {
 }
 
 // --- End of Prompt Template Management Functions ---
+
+// Event listener for the inter-chunk summary toggle (assuming it exists in HTML)
+const interChunkSummaryToggleElement = document.getElementById('inter-chunk-summary-toggle');
+if (interChunkSummaryToggleElement) {
+    interChunkSummaryToggleElement.addEventListener('change', () => {
+        saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.INTER_CHUNK_SUMMARY_ENABLED, interChunkSummaryToggleElement.checked);
+    });
+}
