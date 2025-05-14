@@ -83,31 +83,61 @@
         </div>
 
         <div class="main-content-area">
-            <aside class="panel left-panel" aria-labelledby="left-panel-heading">
-                <h2 id="left-panel-heading" class="panel-main-title visually-hidden">Input and Controls</h2>
-                <div class="card">
-                    <div class="card-header">
-                        <h2><i class="fas fa-file-alt"></i> Source Text</h2>
-                        <div class="header-info-counters">
-                            <div class="word-counter" id="input-word-count">
-                                0 words | 0 chars
-                            </div>
-                            <div class="token-counter" id="input-token-count">
-                                Estimated Tokens: N/A
-                            </div>
-                            <div class="cost-estimator" id="input-cost-estimate">
-                                Estimated Cost: N/A
+            <!-- Input and Output side by side -->
+            <div class="input-output-container">
+                <!-- Input Container -->
+                <div class="input-container">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2><i class="fas fa-file-alt"></i> Source Text</h2>
+                            <div class="header-info-counters">
+                                <div class="word-counter" id="input-word-count">
+                                    0 words | 0 chars
+                                </div>
+                                <div class="token-counter" id="input-token-count">
+                                    Estimated Tokens: N/A
+                                </div>
+                                <div class="cost-estimator" id="input-cost-estimate">
+                                    Estimated Cost: N/A
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <textarea id="translation-box" placeholder="Enter text to translate here..."></textarea>
-                    <div class="textarea-controls">
-                        <button id="clear-input-btn" class="clear-btn"><i class="fas fa-trash-alt"></i> Clear</button>
-                        <button id="translate-btn" class="primary-action-btn"><i class="fas fa-language"></i> Translate</button>
-                        <button id="stop-btn" class="danger-btn" style="display:none;"><i class="fas fa-stop-circle"></i> Stop</button>
+                        <textarea id="translation-box" placeholder="Enter text to translate here..."></textarea>
+                        <div class="textarea-controls">
+                            <button id="clear-input-btn" class="clear-btn"><i class="fas fa-trash-alt"></i> Clear</button>
+                            <button id="translate-btn" class="primary-action-btn"><i class="fas fa-language"></i> Translate</button>
+                            <button id="stop-btn" class="danger-btn" style="display:none;"><i class="fas fa-stop-circle"></i> Stop</button>
+                        </div>
                     </div>
                 </div>
-                
+
+                <!-- Output Container -->
+                <div class="output-container">
+                    <div class="card output-card">
+                        <div class="card-header">
+                            <h2><i class="fas fa-language"></i> Translation Output</h2>
+                            <div class="word-counter" id="output-word-count">0 words | 0 chars</div>
+                        </div>
+                        <div class="output-box" id="output-box" contenteditable="true" placeholder="Translation will appear here..."></div>
+                        <div class="textarea-controls output-controls">
+                            <button id="copy-output-btn" class="action-btn"><i class="fas fa-copy"></i> Copy Output</button>
+                            <button id="save-output-btn" class="save-btn" data-target="output-box"><i class="fas fa-save"></i> Save</button>
+                            <button id="generate-summary-btn" class="primary-action-btn"><i class="fas fa-list-alt"></i> Generate Summary</button>
+                            <button id="clear-output-area-btn" class="action-btn clear-btn"><i class="fas fa-trash-alt"></i> Clear Output</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status Bar - Moved below input and output containers -->
+            <div class="card status-bar central-status">
+                <p id="status-message" aria-live="polite">Ready to translate</p>
+                <div id="progress-indicator-container" class="progress-indicator-container"></div>
+            </div>
+
+            <!-- Controls Container -->
+            <div class="controls-container">
+                <!-- Prompt Template Management -->
                 <div class="card">
                     <div class="card-header">
                         <h2><i class="fas fa-scroll"></i> Prompt Template Management</h2>
@@ -138,12 +168,14 @@
                         <button class="placeholder-btn" data-placeholder="{previous_chapter_summary}">Prev. Ch. Summary</button>
                         <button class="placeholder-btn" data-placeholder="{previous_chunk_summaries}">Prev. Chunk Sums</button>
                         <button class="placeholder-btn" data-placeholder="{source_text}">Source Text</button>
+                        <button class="placeholder-btn" data-placeholder="{glossary_terms}">Glossary Terms</button>
                     </div>
                     <div class="textarea-controls">
                         <button class="save-btn" data-target="prompt-box"><i class="fas fa-save"></i> Save Prompt Text</button>
                     </div>
                 </div>
 
+                <!-- Notes & Instructions -->
                 <div class="card">
                     <div class="card-header">
                         <h2><i class="fas fa-sticky-note"></i> Notes & Instructions</h2>
@@ -155,6 +187,7 @@
                     </div>
                 </div>
 
+                <!-- Glossary / Terminology -->
                 <div class="card">
                     <div class="card-header">
                         <h2><i class="fas fa-book"></i> Glossary / Terminology</h2>
@@ -175,28 +208,20 @@
                         <p class="no-glossary-terms" style="display: none;">No glossary terms defined yet.</p>
                     </div>
                 </div>
-            </aside>
 
-            <main class="panel middle-panel" aria-labelledby="middle-panel-heading">
-                <h2 id="middle-panel-heading" class="panel-main-title visually-hidden">Translation Output</h2>
-                <div class="card output-card">
-                    <div class="card status-bar">
-                        <p id="status-message" aria-live="polite">Ready to translate</p>
-                        <div id="progress-indicator-container" class="progress-indicator-container"></div>
-                    </div>
+                <!-- Fandom Context -->
+                <div class="card">
                     <div class="card-header">
-                        <h2><i class="fas fa-language"></i> Translation Output</h2>
-                        <div class="word-counter" id="output-word-count">0 words | 0 chars</div>
+                        <h2><i class="fas fa-users"></i> Fandom Context</h2>
                     </div>
-                    <div class="output-box" id="output-box" contenteditable="true" placeholder="Translation will appear here..."></div>
-                    <div class="textarea-controls output-controls">
-                        <button id="copy-output-btn" class="action-btn"><i class="fas fa-copy"></i> Copy Output</button>
-                        <button id="save-output-btn" class="save-btn" data-target="output-box"><i class="fas fa-save"></i> Save</button>
-                        <button id="generate-summary-btn" class="primary-action-btn"><i class="fas fa-list-alt"></i> Generate Summary</button>
-                        <button id="clear-output-area-btn" class="action-btn clear-btn"><i class="fas fa-trash-alt"></i> Clear Output</button>
+                    <textarea id="fandom-box" placeholder="Enter fandom-specific context or terminology here..."></textarea>
+                    <div class="textarea-controls">
+                        <button id="clear-fandom-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
+                        <button class="save-btn" data-target="fandom-box"><i class="fas fa-save"></i> Save</button>
                     </div>
                 </div>
-                
+
+                <!-- Summary Area -->
                 <div class="card summary-area" style="display: none;">
                     <div class="card-header">
                         <h2><i class="fas fa-clipboard-list"></i> Translation Summary</h2>
@@ -208,21 +233,7 @@
                         <button id="add-to-prompt-btn" class="action-btn"><i class="fas fa-plus-circle"></i> Add to Prompt</button>
                     </div>
                 </div>
-            </main>
-
-            <aside class="panel right-panel" aria-labelledby="right-panel-heading">
-                <h2 id="right-panel-heading" class="panel-main-title visually-hidden">Settings and Tools</h2>
-                <div class="card">
-                    <div class="card-header">
-                        <h2><i class="fas fa-users"></i> Fandom Context</h2>
-                    </div>
-                    <textarea id="fandom-box" placeholder="Enter fandom-specific context or terminology here..."></textarea>
-                    <div class="textarea-controls">
-                        <button id="clear-fandom-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
-                        <button class="save-btn" data-target="fandom-box"><i class="fas fa-save"></i> Save</button>
-                    </div>
-                </div>
-            </aside>
+            </div>
         </div>
         
         <div class="status-area">
@@ -243,8 +254,8 @@
                     <button id="close-api-modal" class="close-btn"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="input-group">
-                    <label for="groq-api-key">Groq API Key:</label>
-                    <input type="password" id="groq-api-key" placeholder="Enter your Groq API key">
+                    <label for="grok-api-key">Grok API Key:</label>
+                    <input type="password" id="grok-api-key" placeholder="Enter your Grok API key">
                 </div>
                 <div class="input-group">
                     <label for="deepseek-api-key">DeepSeek API Key:</label>
