@@ -26,7 +26,7 @@ const summaryArea = document.querySelector('.summary-area');
 const summaryBox = document.getElementById('summary-box');
 const copySummaryBtn = document.getElementById('copy-summary-btn');
 const useSummaryBtn = document.getElementById('use-summary-btn');
-// const clearOutputBtn = document.getElementById('clear-output-btn'); // This is unused, replaced by clearOutputAreaBtn
+const progressIndicatorContainer = document.getElementById('progress-indicator-container'); // New progress container
 
 // Prompt Template Management DOM Elements
 const promptTemplateNameInput = document.getElementById('prompt-template-name');
@@ -57,12 +57,14 @@ const CONSTANTS = {
         SUMMARY: 'None provided.',
         SOURCE_LANGUAGE: 'Japanese',
         TEMPERATURE: 0.7,
-        STREAM_ENABLED: false // Default for stream toggle if not in localStorage
+        STREAM_ENABLED: false, // Default for stream toggle if not in localStorage
+        INTER_CHUNK_SUMMARY_ENABLED: false // Default for inter-chunk summary toggle
     },
     TIMEOUTS: {
         AUTO_SAVE_DEBOUNCE: 1500,
         STATUS_MESSAGE_DEFAULT: 5000,
-        STATUS_LOADED_SESSION: 3000
+        STATUS_LOADED_SESSION: 3000,
+        STREAM_BUFFER_FLUSH_INTERVAL: 100 // ms, for flushing buffered stream content to DOM
     },
     LOCAL_STORAGE_KEYS: {
         TRANSLATION_CONTENT: 'translationContent',
@@ -101,36 +103,30 @@ let deepseekApiKey = '';
 // Add a global variable for the tokenizer server URL
 let tokenizerServerUrl = null; // Default to null, to be set by config
 
+// Debounce function
+function debounce(func, delay) {
+    let timeout;
+    return function(...args) {
+        const context = this;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(context, args), delay);
+    };
+}
+
 // --- Default Prompt Template ---
-const defaultPromptTemplate = `You are an expert fanfiction translator. Your task is to completely and accurately translate the following work from {source_language} into {target_language}, ensuring that all chapters are translated in full and without interruption until the entire text is complete.
+const defaultPromptTemplate = `Translate the following text from {source_language} into {target_language}. Provide ONLY the translated text itself, without any introductory phrases, concluding remarks, explanations, or any other conversational text. The output must be exclusively the direct translation.
 
-Fandom Context:{fandom_context}
+Fandom Context (if provided, use to inform translation nuances):{fandom_context}
 
-Previous Chapter Summary (for continuity):{previous_chapter_summary}
+Previous Chapter Summary (for continuity, if provided):{previous_chapter_summary}
 
-Previous Chunk Summaries (for context):{previous_chunk_summaries}
+Previous Chunk Summaries (for context, if provided):{previous_chunk_summaries}
 
-Translator Notes & Special Instructions:{notes}
+Translator Notes & Special Instructions (if provided, follow strictly):{notes}
 
-Source Text:
+Source Text to Translate:
 
-{source_text}
-
-Translation Guidelines:
-
-Preserve the original tone, style, character voices, and narrative flow.
-
-Maintain all nuances and emotional subtext present in the original.
-
-Adapt cultural references thoughtfully for an English-speaking audience, while keeping the intent and meaning intact.
-
-Ensure the translation is fluent, idiomatic, and natural in {target_language}.
-
-Rigorously follow any additional guidance provided in the Translator Notes.
-
-Translate all chapters completely—do not stop until the full work is translated. No summarizing, skipping, or paraphrasing.
-
-Begin full translation below:`;
+{source_text}`;
 
 // Model Pricing Data (Example - Update with actual Groq pricing if available)
 const modelPricing = {
@@ -203,15 +199,21 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
         const outputCounter = document.getElementById('output-counter');
         
         if (sourceCounter && translationBox) {
-            updateWordCount(translationBox, sourceCounter);
-            translationBox.addEventListener('input', () => updateWordCount(translationBox, sourceCounter));
+            const debouncedUpdateInputWordCount = debounce(() => updateWordCount(translationBox, sourceCounter), 250);
+            // updateWordCount(translationBox, sourceCounter); // Initial call
+            translationBox.addEventListener('input', debouncedUpdateInputWordCount);
         }
         
         if (outputCounter && outputBox) {
-            updateWordCount(outputBox, outputCounter);
-            outputBox.addEventListener('input', () => updateWordCount(outputBox, outputCounter));
+            const debouncedUpdateOutputWordCount = debounce(() => updateWordCount(outputBox, outputCounter), 250);
+            // updateWordCount(outputBox, outputCounter); // Initial call
+            // outputBox.addEventListener('input', debouncedUpdateOutputWordCount); // Output box is contenteditable, so its content changes programmatically or via paste
+            // For contenteditable, MutationObserver is more robust for all changes.
+            // However, simple paste and programmatic changes will be handled by calling updateWordCount manually after those operations.
+            // Let's keep the input listener for direct typing, though it might be less common for outputBox.
+            outputBox.addEventListener('input', debouncedUpdateOutputWordCount); 
             outputBox.addEventListener('paste', () => {
-                setTimeout(() => updateWordCount(outputBox, outputCounter), 100);
+                setTimeout(debouncedUpdateOutputWordCount, 100); // Allow paste to settle
             });
         }
         
@@ -755,12 +757,13 @@ async function handleTranslation() {
         outputBox.innerHTML = ''; // Clear for rich text editor
         if (typeof outputBox.value !== 'undefined') outputBox.value = ''; // Clear for textarea fallback
     }
+    if (progressIndicatorContainer) progressIndicatorContainer.innerHTML = ''; // Clear previous progress
 
-    // Create progress indicator
-    const progressIndicator = document.createElement('div');
-    progressIndicator.className = 'translation-progress';
-    progressIndicator.style.cssText = 'background: #313244; padding: 10px; margin-bottom: 15px; border-radius: 5px; text-align: center; font-weight: bold;';
-    outputBox.appendChild(progressIndicator);
+    // Create progress indicator - No longer creating a new element, using the container
+    // const progressIndicator = document.createElement('div');
+    // progressIndicator.className = 'translation-progress';
+    // progressIndicator.style.cssText = 'background: #313244; padding: 10px; margin-bottom: 15px; border-radius: 5px; text-align: center; font-weight: bold;';
+    // outputBox.appendChild(progressIndicator); // No longer appending to outputBox
 
     abortController = new AbortController(); // One controller for the whole batch
     let overallSuccess = true;
@@ -777,10 +780,12 @@ async function handleTranslation() {
         console.log(`[Translate] Text split into ${textChunks.length} chunks for batch processing.`);
         
         // Update progress indicator with total chunks
-        progressIndicator.innerHTML = `<div>Preparing to translate ${textChunks.length} chunks</div>
-                                     <div style="height: 10px; background: #45475a; border-radius: 5px; margin-top: 8px;">
-                                        <div class="progress-bar" style="width: 0%; height: 100%; background: #89b4fa; border-radius: 5px; transition: width 0.3s;"></div>
-                                     </div>`;
+        if (progressIndicatorContainer) {
+            progressIndicatorContainer.innerHTML = `<div>Preparing to translate ${textChunks.length} chunks</div>
+                                         <div class="progress-bar-bg" style="height: 10px; background: var(--input-bg); border-radius: 5px; margin-top: 8px; overflow: hidden;">
+                                            <div class="progress-bar-fg" style="width: 0%; height: 100%; background: var(--primary); border-radius: 5px; transition: width 0.3s ease;"></div>
+                                         </div>`;
+        }
         
         let chunkSummaries = []; // To store summaries for inter-chunk context (future feature)
         // Check if inter-chunk summaries are enabled
@@ -799,10 +804,12 @@ async function handleTranslation() {
             
             // Update progress indicator
             const progressPercent = ((i) / textChunks.length * 100).toFixed(1);
-            progressIndicator.innerHTML = `<div>Translating chunk ${chunkNumber} of ${textChunks.length} (${progressPercent}% complete)</div>
-                                         <div style="height: 10px; background: #45475a; border-radius: 5px; margin-top: 8px;">
-                                            <div class="progress-bar" style="width: ${progressPercent}%; height: 100%; background: #89b4fa; border-radius: 5px; transition: width 0.3s;"></div>
-                                         </div>`;
+            if (progressIndicatorContainer) {
+                 progressIndicatorContainer.innerHTML = `<div>Translating chunk ${chunkNumber} of ${textChunks.length} (${progressPercent}% complete)</div>
+                                             <div class="progress-bar-bg" style="height: 10px; background: var(--input-bg); border-radius: 5px; margin-top: 8px; overflow: hidden;">
+                                                <div class="progress-bar-fg" style="width: ${progressPercent}%; height: 100%; background: var(--primary); border-radius: 5px; transition: width 0.3s ease;"></div>
+                                             </div>`;
+            }
             
             updateStatus(`Translating chunk ${chunkNumber} of ${textChunks.length}...`, CONSTANTS.STATUS_TYPES.PROCESSING, 0);
             console.log(`[Translate] Processing chunk ${chunkNumber}/${textChunks.length}. Size: ${chunkTextToTranslate.length} chars.`);
@@ -846,27 +853,41 @@ async function handleTranslation() {
             outputBox.appendChild(chunkContainer);
 
             let chunkStreamCallback = null;
-        if (enableStream) {
-                chunkStreamCallback = (text) => {
-                if (outputBox) {
-                    const formattedText = formatMarkdown(text);
+            let streamBuffer = '';
+            let streamUpdateTimer = null;
+
+            function flushStreamBuffer() {
+                if (streamBuffer.length > 0) {
+                    const formattedText = formatMarkdown(streamBuffer);
                     if (chunkContainer) {
                         chunkContainer.innerHTML += formattedText;
-                    } else if (typeof outputBox.innerHTML !== 'undefined') {
+                    } else if (outputBox) { // Fallback if chunkContainer somehow not available
                         outputBox.innerHTML += formattedText;
-                    } else if (typeof outputBox.value !== 'undefined') {
-                        outputBox.value += text;
                     }
-                    if (outputBox.scrollHeight) {
-                        outputBox.scrollTop = outputBox.scrollHeight;
+                    streamBuffer = ''; // Clear buffer after flushing
+                    if (outputBox && outputBox.scrollHeight) {
+                        outputBox.scrollTop = outputBox.scrollHeight; // Scroll to bottom
                     }
                 }
-            };
-        }
+            }
+
+            if (enableStream) {
+                chunkStreamCallback = (text) => {
+                    streamBuffer += text;
+                    clearTimeout(streamUpdateTimer);
+                    streamUpdateTimer = setTimeout(flushStreamBuffer, CONSTANTS.TIMEOUTS.STREAM_BUFFER_FLUSH_INTERVAL);
+                };
+            }
         
             try {
                 const translation = await getTranslation(processedChunkPrompt, selectedModel, temperature, enableStream, chunkStreamCallback, abortController.signal);
-        
+                
+                // After stream ends (or if not streaming), ensure any remaining buffer is flushed
+                if (enableStream) {
+                    clearTimeout(streamUpdateTimer); // Clear any pending timer
+                    flushStreamBuffer(); // Flush any remaining content
+                }
+
                 if (abortController.signal.aborted) {
                     overallSuccess = false;
                     break; 
@@ -901,7 +922,7 @@ async function handleTranslation() {
                         const chunkSummary = await generateChunkSummary(translation, selectedModel, temperature);
                         if (chunkSummary) {
                             chunkSummaries.push(chunkSummary);
-                            console.log(`[Translate Chunk ${chunkNumber}] Inter-chunk summary generated and stored.`);
+                            console.log(`[Translate Chunk ${chunkNumber}] Inter-chunk summary generated and stored: "${chunkSummary}"`);
                         } else {
                             console.warn(`[Translate Chunk ${chunkNumber}] Inter-chunk summary was empty.`);
                         }
@@ -930,10 +951,13 @@ async function handleTranslation() {
 
         // Update final progress
         const finalProgressPercent = overallSuccess && !abortController.signal.aborted ? 100 : ((textChunks.length - 1) / textChunks.length * 100).toFixed(1);
-        progressIndicator.innerHTML = `<div>Translation ${overallSuccess ? 'completed' : 'stopped'}: ${finalProgressPercent}% complete</div>
-                                     <div style="height: 10px; background: #45475a; border-radius: 5px; margin-top: 8px;">
-                                        <div class="progress-bar" style="width: ${finalProgressPercent}%; height: 100%; background: ${overallSuccess ? '#a6e3a1' : '#f38ba8'}; border-radius: 5px;"></div>
-                                     </div>`;
+        if (progressIndicatorContainer) {
+            const barColor = overallSuccess && !abortController.signal.aborted ? 'var(--success)' : 'var(--danger)';
+            progressIndicatorContainer.innerHTML = `<div>Translation ${overallSuccess && !abortController.signal.aborted ? 'completed' : 'stopped'}</div>
+                                         <div class="progress-bar-bg" style="height: 10px; background: var(--input-bg); border-radius: 5px; margin-top: 8px; overflow: hidden;">
+                                            <div class="progress-bar-fg" style="width: ${finalProgressPercent}%; height: 100%; background: ${barColor}; border-radius: 5px; transition: width 0.3s ease;"></div>
+                                         </div>`;
+        }
 
         if (overallSuccess && !abortController.signal.aborted) {
             updateStatus('All chunks translated successfully!', CONSTANTS.STATUS_TYPES.SUCCESS);
@@ -958,6 +982,13 @@ async function handleTranslation() {
         const finalOutputCounter = document.getElementById('output-word-count');
         if (finalOutputCounter && outputBox) updateWordCount(outputBox, finalOutputCounter);
         
+        // Clear progress indicator after a short delay if successful, or keep if stopped/error
+        setTimeout(() => {
+            if (progressIndicatorContainer && overallSuccess && !abortController.signal.aborted) {
+                progressIndicatorContainer.innerHTML = '';
+            }
+        }, overallSuccess && !abortController.signal.aborted ? 3000 : 0); // Clear after 3s on success, keep if error/stopped or clear immediately if not needed
+
         if (overallSuccess && !abortController.signal.aborted) {
              if (generateSummaryBtn) generateSummaryBtn.disabled = false;
         } else {
@@ -1507,6 +1538,14 @@ function loadFromLocalStorage() {
     updatePricingDisplay();
     console.info('[LocalStorage] Finished loading data from local storage.');
     updateStatus('Loaded previous session from local storage.', CONSTANTS.STATUS_TYPES.INFO, CONSTANTS.TIMEOUTS.STATUS_LOADED_SESSION);
+    
+    // Initial word counts after loading from local storage
+    if (translationBox && document.getElementById('input-word-count')) {
+        updateWordCount(translationBox, document.getElementById('input-word-count'));
+    }
+    if (outputBox && document.getElementById('output-word-count')) {
+        updateWordCount(outputBox, document.getElementById('output-word-count'));
+    }
 }
 
 // Format markdown to HTML for rich text display
