@@ -110,10 +110,29 @@ const CONSTANTS = {
     PROMPTS: { // Added new category for prompts
         AI_GLOSSARY_GENERATION: `You are an expert in terminology extraction for translation.
 Given the following "Source Text", "Fandom Context", "Translator Notes", "Source Language", and "Target Language", identify key terms, names, or phrases that should be included in a glossary for consistent translation.
-For each term you identify, provide its direct translation into the "Target Language".
+
+For each term you identify, provide:
+1. A Category from the predefined list below.
+2. The Original Term in the Source Language.
+3. Its direct Translation into the Target Language.
+
+Predefined Categories (Choose one for each term):
+- Characters
+- Locations
+- Techniques
+- Items
+- Concepts
+- Titles
+- Organizations
+- Other (use for terms that don\'t fit other categories)
+
+Output Format (Strictly Adhere):
+Each term must be on a new line, formatted exactly as: "Category: Original Term: Translated Term"
+Example: "Characters: Uzumaki Naruto: Naruto Uzumaki"
+Example: "Locations: Konohagakure no Sato: Hidden Leaf Village"
+Example: "Techniques: Kage Bunshin no Jutsu: Shadow Clone Jutsu"
 
 Constraints:
-- Output each term and its translation on a new line, formatted as: "Original Term: Translated Term".
 - Only include terms that are non-trivial or specific to the context.
 - Do not include common words unless they have a very specific meaning in this context.
 - If no specific terms are found, output "No specific glossary terms identified."
@@ -2224,9 +2243,8 @@ document.addEventListener('DOMContentLoaded', () => {
 // --- AI Glossary Generation Function ---
 async function handleAIGlossaryGeneration() {
     console.info('[AIGlossary] Initiating AI glossary generation...');
-    const AI_GENERATED_CATEGORY = "AI Suggested"; // Define a category for AI terms
+    // const AI_GENERATED_CATEGORY = "AI Suggested"; // Old default category
 
-    // ... (rest of the initial checks and setup for sourceText, model, etc.) ...
     if (!translationBox || !modelSelect) {
         updateStatus("Cannot generate glossary: Missing required elements (source text or model select).", CONSTANTS.STATUS_TYPES.ERROR);
         return;
@@ -2252,7 +2270,7 @@ async function handleAIGlossaryGeneration() {
     let overallSuccess = true;
     let abortControllerForGlossary = new AbortController();
 
-    try {
+    try { // Outer try
         const textChunks = await createTextChunks(originalSourceText, selectedModel);
         if (textChunks.length === 0) {
             updateStatus('No text to process for glossary generation.', CONSTANTS.STATUS_TYPES.INFO);
@@ -2261,11 +2279,15 @@ async function handleAIGlossaryGeneration() {
         }
         
         updateStatus(`Starting glossary generation for ${textChunks.length} chunks...`, CONSTANTS.STATUS_TYPES.PROCESSING);
-        const allIdentifiedTerms = {}; // Collect all terms here { source: target }
+        
+        // This will store terms categorized by the AI: { "Category1": { "termA": "transA" }, "Category2": { ... } }
+        const allIdentifiedTermsByCategory = {}; 
         let totalChunksProcessed = 0;
 
+        const validAICategories = ["Characters", "Locations", "Techniques", "Items", "Concepts", "Titles", "Organizations", "Other"];
+        const defaultAICategoryOnError = "AI Suggested - Needs Review";
+
         for (let i = 0; i < textChunks.length; i++) {
-            // ... (abort checks, chunk processing, prompt creation) ...
             if (abortControllerForGlossary.signal.aborted) {
                 console.info('[AIGlossary] Glossary generation aborted by user during chunk processing.');
                 overallSuccess = false;
@@ -2274,6 +2296,7 @@ async function handleAIGlossaryGeneration() {
             const chunkTextToAnalyze = textChunks[i];
             const chunkNumber = i + 1;
             updateStatus(`Generating glossary for chunk ${chunkNumber} of ${textChunks.length}...`, CONSTANTS.STATUS_TYPES.PROCESSING, 0);
+            
             const prompt = CONSTANTS.PROMPTS.AI_GLOSSARY_GENERATION
                 .replace(/{source_language}/g, sourceLanguage)
                 .replace(/{target_language}/g, targetLanguage)
@@ -2281,70 +2304,97 @@ async function handleAIGlossaryGeneration() {
                 .replace(/{notes}/g, notes)
                 .replace(/{source_text}/g, chunkTextToAnalyze);
 
-            try {
+            try { // Inner try for each chunk API call
                 const aiResponse = await getTranslation(prompt, selectedModel, temperature, false, null, abortControllerForGlossary.signal);
-                if (abortControllerForGlossary.signal.aborted) { overallSuccess = false; break; }
+                
+                if (abortControllerForGlossary.signal.aborted) { 
+                    overallSuccess = false; 
+                    break; 
+                }
 
                 if (aiResponse && aiResponse.trim().toLowerCase() !== "no specific glossary terms identified.") {
                     const lines = aiResponse.trim().split('\n');
                     for (const line of lines) {
                         const parts = line.split(':');
-                        if (parts.length >= 2) {
-                            const sourceTerm = parts[0].trim();
-                            const targetTranslation = parts.slice(1).join(':').trim();
-                            if (sourceTerm && targetTranslation) {
-                                allIdentifiedTerms[sourceTerm] = targetTranslation; // Overwrite if duplicate, take latest from AI
+                        if (parts.length >= 3) { // Expecting "Category: Original Term: Translated Term"
+                            let category = parts[0].trim();
+                            const sourceTerm = parts[1].trim();
+                            const targetTranslation = parts.slice(2).join(':').trim(); // Join back in case translation has colons
+
+                            if (!validAICategories.includes(category)) {
+                                console.warn(`[AIGlossary] AI provided invalid category: '${category}'. Using default: '${defaultAICategoryOnError}'. Term: '${sourceTerm}'`);
+                                category = defaultAICategoryOnError;
                             }
+
+                            if (sourceTerm && targetTranslation) {
+                                if (!allIdentifiedTermsByCategory[category]) {
+                                    allIdentifiedTermsByCategory[category] = {};
+                                }
+                                allIdentifiedTermsByCategory[category][sourceTerm] = targetTranslation; // Overwrite if duplicate from AI within same category
+                            }
+                        } else {
+                            console.warn(`[AIGlossary] AI response line did not match expected format (Category: Term: Translation): '${line}'`);
                         }
                     }
                 }
                 totalChunksProcessed++;
-            } catch (chunkError) {
-                // ... (error handling for chunkError) ...
+            } catch (chunkError) { // Inner catch
                 if (chunkError.name === 'AbortError') {
                     console.info(`[AIGlossary Chunk ${chunkNumber}] Aborted by user.`);
                 } else {
                     console.error(`[AIGlossary Chunk ${chunkNumber}] Error:`, chunkError);
                     updateStatus(`Error on glossary chunk ${chunkNumber}: ${chunkError.message}`, CONSTANTS.STATUS_TYPES.ERROR, 10000);
                 }
-                if (abortControllerForGlossary.signal.aborted) break;
-            }
-        }
+                if (abortControllerForGlossary.signal.aborted) {
+                    break; 
+                }
+            } // End inner catch
+        } // End for loop
         
-        if (Object.keys(allIdentifiedTerms).length > 0) {
+        if (Object.keys(allIdentifiedTermsByCategory).length > 0) {
             const currentGlossary = getGlossary();
-            if (!currentGlossary[AI_GENERATED_CATEGORY]) {
-                currentGlossary[AI_GENERATED_CATEGORY] = {};
-            }
             let newTermsAddedCount = 0;
-            for (const sourceTerm in allIdentifiedTerms) {
-                if (allIdentifiedTerms.hasOwnProperty(sourceTerm)) {
-                    const targetTranslation = allIdentifiedTerms[sourceTerm];
-                    // Add to AI_GENERATED_CATEGORY, overwriting if already there under this category from a previous AI run
-                    currentGlossary[AI_GENERATED_CATEGORY][sourceTerm] = targetTranslation;
-                    newTermsAddedCount++; // Count every term identified by AI as an addition/update to this category
+            let categoriesAffected = new Set();
+
+            for (const category in allIdentifiedTermsByCategory) {
+                if (allIdentifiedTermsByCategory.hasOwnProperty(category)) {
+                    if (!currentGlossary[category]) {
+                        currentGlossary[category] = {}; // Ensure category exists in main glossary
+                    }
+                    const termsInAICategory = allIdentifiedTermsByCategory[category];
+                    for (const sourceTerm in termsInAICategory) {
+                        if (termsInAICategory.hasOwnProperty(sourceTerm)) {
+                            const targetTranslation = termsInAICategory[sourceTerm];
+                            // Add or update term in its AI-determined category
+                            // This will overwrite if the term already exists in that category from a previous AI run or manual entry
+                            currentGlossary[category][sourceTerm] = targetTranslation;
+                            newTermsAddedCount++;
+                            categoriesAffected.add(category);
+                        }
+                    }
                 }
             }
+
             if (newTermsAddedCount > 0) {
                 saveGlossary(currentGlossary);
                 renderGlossary();
-                updateStatus(`AI processed ${totalChunksProcessed}/${textChunks.length} chunks and added/updated ${newTermsAddedCount} term(s) to '${AI_GENERATED_CATEGORY}'.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+                const affectedCategoryList = Array.from(categoriesAffected).join(', ');
+                updateStatus(`AI processed ${totalChunksProcessed}/${textChunks.length} chunks and added/updated ${newTermsAddedCount} term(s) in categories: ${affectedCategoryList}.`, CONSTANTS.STATUS_TYPES.SUCCESS);
             } else {
-                 updateStatus(`AI processed ${totalChunksProcessed}/${textChunks.length} chunks. No new terms were identified by AI.`, CONSTANTS.STATUS_TYPES.INFO);
+                 updateStatus(`AI processed ${totalChunksProcessed}/${textChunks.length} chunks. No new terms were identified or updated by AI.`, CONSTANTS.STATUS_TYPES.INFO);
             }
         } else if (overallSuccess && totalChunksProcessed === textChunks.length) {
              updateStatus(`AI processed all ${textChunks.length} chunks. No specific glossary terms were identified.`, CONSTANTS.STATUS_TYPES.INFO);
-        } else if (!overallSuccess) {
+        } else if (!overallSuccess) { // This includes aborted cases
             updateStatus(`Glossary generation stopped or completed with errors after processing ${totalChunksProcessed}/${textChunks.length} chunks.`, CONSTANTS.STATUS_TYPES.WARNING);
         }
 
-    } catch (error) { 
+    } catch (error) { // Outer catch for setup errors etc.
         console.error('[AIGlossary] General error during AI glossary generation setup:', error);
         updateStatus('Error setting up AI glossary generation: ' + error.message, CONSTANTS.STATUS_TYPES.ERROR);
-    } finally {
+    } finally { // Outer finally
         if (aiGenerateGlossaryBtn) aiGenerateGlossaryBtn.disabled = false;
-        // Hook into stopBtn - this simple hook might be problematic if stopBtn is clicked for other reasons.
-        // A dedicated stop button for AI glossary might be better in the long run.
+        // Stop button hook (remains unchanged for now)
         if (stopBtn && !translationInProgress) {
             const originalStopAction = stopBtn.onclick;
             stopBtn.onclick = () => {
@@ -2355,9 +2405,7 @@ async function handleAIGlossaryGeneration() {
                 stopBtn.onclick = originalStopAction;
             };
         } else if (stopBtn && translationInProgress && abortControllerForGlossary && !abortControllerForGlossary.signal.aborted) {
-            // If translation is running, the main abortController will handle it.
-            // We might also want to abort glossary if it was somehow running concurrently, though current design is sequential.
-            // For now, let main translation stop handle it. Consider a more robust state management if they can run truly concurrently.
+            // No change here
         }
     }
 }
