@@ -110,7 +110,7 @@ const CONSTANTS = {
     },
     PROMPTS: { // Added new category for prompts
         AI_GLOSSARY_GENERATION: `You are an expert in terminology extraction for translation.
-Given the following "Source Text", "Fandom Context", "Translator Notes", "Source Language", and "Target Language", identify key terms, names, or phrases that should be included in a glossary for consistent translation.
+Given the following "Source Text", "Fandom Context", "Translator Notes", "Source Language", "Target Language", and any "Existing Glossary Terms", identify key terms, names, or phrases that should be included in a glossary for consistent translation.
 
 For each term you identify, provide:
 1. A Category from the predefined list below.
@@ -130,14 +130,14 @@ Predefined Categories (Choose one for each term):
 Output Format (Strictly Adhere):
 Each term must be on a new line, formatted exactly as: "Category: Original Term: Translated Term"
 Example: "Characters: Uzumaki Naruto: Naruto Uzumaki"
-Example: "Locations: Konohagakure no Sato: Hidden Leaf Village"
-Example: "Techniques: Kage Bunshin no Jutsu: Shadow Clone Jutsu"
 
 Constraints:
+- Review the "Existing Glossary Terms" (if provided). Avoid re-listing terms that are already well-defined unless you are suggesting a significant correction or a more appropriate category.
+- Focus on identifying *new* terms or *improving* existing ones.
 - Only include terms that are non-trivial or specific to the context.
 - Do not include common words unless they have a very specific meaning in this context.
-- If no specific terms are found, output "No specific glossary terms identified."
-- Do not add any introductory or concluding remarks, just the list of terms or the "no terms" message.
+- If no new or improved terms are found, output "No new glossary terms identified or improvements needed."
+- Do not add any introductory or concluding remarks, just the list of terms or the "no new terms" message.
 
 Source Language: {source_language}
 Target Language: {target_language}
@@ -147,6 +147,9 @@ Fandom Context (if provided):
 
 Translator Notes & Special Instructions (if provided):
 {notes}
+
+Existing Glossary Terms (if any):
+{existing_glossary_terms}
 
 Source Text to Analyze:
 {source_text}`
@@ -2366,11 +2369,30 @@ async function handleAIGlossaryGeneration() {
             const chunkNumber = i + 1;
             updateStatus(`Generating glossary for chunk ${chunkNumber} of ${textChunks.length}...`, CONSTANTS.STATUS_TYPES.PROCESSING, 0);
             
+            // Format existing glossary for the prompt
+            const currentGlossaryForPrompt = getGlossary();
+            let formattedExistingGlossary = "None";
+            const existingTermsArray = [];
+            for (const catName in currentGlossaryForPrompt) {
+                if (currentGlossaryForPrompt.hasOwnProperty(catName)) {
+                    const termsInCat = currentGlossaryForPrompt[catName];
+                    for (const srcTerm in termsInCat) {
+                        if (termsInCat.hasOwnProperty(srcTerm)) {
+                            existingTermsArray.push(`${catName}: ${srcTerm}: ${termsInCat[srcTerm]}`);
+                        }
+                    }
+                }
+            }
+            if (existingTermsArray.length > 0) {
+                formattedExistingGlossary = existingTermsArray.join('\n');
+            }
+
             const prompt = CONSTANTS.PROMPTS.AI_GLOSSARY_GENERATION
                 .replace(/{source_language}/g, sourceLanguage)
                 .replace(/{target_language}/g, targetLanguage)
                 .replace(/{fandom_context}/g, fandomContext)
                 .replace(/{notes}/g, notes)
+                .replace(/{existing_glossary_terms}/g, formattedExistingGlossary) // Add existing glossary to prompt
                 .replace(/{source_text}/g, chunkTextToAnalyze);
 
             try { // Inner try for each chunk API call
@@ -2381,7 +2403,7 @@ async function handleAIGlossaryGeneration() {
                     break; 
                 }
 
-                if (aiResponse && aiResponse.trim().toLowerCase() !== "no specific glossary terms identified.") {
+                if (aiResponse && aiResponse.trim().toLowerCase() !== "no specific glossary terms identified." && aiResponse.trim().toLowerCase() !== "no new glossary terms identified or improvements needed.") {
                     const lines = aiResponse.trim().split('\n');
                     for (const line of lines) {
                         const parts = line.split(':');
@@ -2450,10 +2472,10 @@ async function handleAIGlossaryGeneration() {
                 const affectedCategoryList = Array.from(categoriesAffected).join(', ');
                 updateStatus(`AI processed ${totalChunksProcessed}/${textChunks.length} chunks and added/updated ${newTermsAddedCount} term(s) in categories: ${affectedCategoryList}.`, CONSTANTS.STATUS_TYPES.SUCCESS);
             } else {
-                 updateStatus(`AI processed ${totalChunksProcessed}/${textChunks.length} chunks. No new terms were identified or updated by AI.`, CONSTANTS.STATUS_TYPES.INFO);
+                 updateStatus(`AI processed ${totalChunksProcessed}/${textChunks.length} chunks. No new or different terms were identified or updated by AI.`, CONSTANTS.STATUS_TYPES.INFO);
             }
         } else if (overallSuccess && totalChunksProcessed === textChunks.length) {
-             updateStatus(`AI processed all ${textChunks.length} chunks. No specific glossary terms were identified.`, CONSTANTS.STATUS_TYPES.INFO);
+             updateStatus(`AI processed all ${textChunks.length} chunks. No new glossary terms were identified by the AI, or no improvements were needed for existing ones.`, CONSTANTS.STATUS_TYPES.INFO);
         } else if (!overallSuccess) { // This includes aborted cases
             updateStatus(`Glossary generation stopped or completed with errors after processing ${totalChunksProcessed}/${textChunks.length} chunks.`, CONSTANTS.STATUS_TYPES.WARNING);
         }
