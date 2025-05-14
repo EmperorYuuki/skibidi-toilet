@@ -231,8 +231,16 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
         if (copyOutputBtn) {
             copyOutputBtn.addEventListener('click', function() {
                 const textToCopy = outputBox.innerText || outputBox.textContent;
-                copyToClipboard(textToCopy);
-                updateStatus('Copied to clipboard!', CONSTANTS.STATUS_TYPES.SUCCESS);
+                copyToClipboard(textToCopy); // Original function handles status update
+                
+                const originalText = copyOutputBtn.innerHTML;
+                copyOutputBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                copyOutputBtn.disabled = true;
+                
+                setTimeout(() => {
+                    copyOutputBtn.innerHTML = originalText;
+                    copyOutputBtn.disabled = false;
+                }, 2000);
             });
         }
         
@@ -976,6 +984,12 @@ async function handleTranslation() {
         // Update final word count for the entire output
         const finalOutputCounter = document.getElementById('output-word-count');
         if (finalOutputCounter && outputBox) updateWordCount(outputBox, finalOutputCounter);
+
+        // Save the final output to localStorage
+        if (outputBox) {
+            saveToLocalStorage(CONSTANTS.LOCAL_STORAGE_KEYS.OUTPUT_CONTENT, outputBox.innerHTML);
+            console.log('[Translate] Final translated output saved to localStorage.');
+        }
         
         // Clear progress indicator after a short delay if successful, or keep if stopped/error
         setTimeout(() => {
@@ -1001,7 +1015,7 @@ async function generateChunkSummary(textToSummarize, model, originalTemperature)
     }
 
     console.log(`[ChunkSummary] Requesting summary for chunk. Model: ${model}`);
-    const summaryPrompt = `Based on the following text, provide a very concise summary (1-2 sentences) focusing on key events, characters, and information that would be essential for maintaining context if translating the *next* part of this story. Output only the summary itself:
+    const summaryPrompt = `Based on the following text, provide a detailed summary of around 200-500 words. The summary should focus on key plot developments, important character interactions, significant events, and any crucial information that would be essential for maintaining context and continuity if translating the *next* part of this story. Output only the summary itself, without any introductory or concluding remarks:
 
 Text:
 ${textToSummarize}`;
@@ -1257,6 +1271,11 @@ async function handleApiError(response, modelName = 'selected') { // Added model
 
 // Clear specific field, its local storage, and optionally update its word count
 function clearSpecificField(elementId, storageKey, wordCountElementId = null) {
+    if (!confirm(`Are you sure you want to clear the ${elementId.replace('-box', '').replace('-', ' ')} field?`)) {
+        updateStatus(`${elementId.replace('-box','').replace('-', ' ')} clearing cancelled.`, CONSTANTS.STATUS_TYPES.INFO);
+        return;
+    }
+
     const element = document.getElementById(elementId);
     if (element) {
         if (elementId === 'output-box') { // Simplified condition
@@ -1284,6 +1303,10 @@ function clearSpecificField(elementId, storageKey, wordCountElementId = null) {
 
 // Clear Prompt, Fandom, Notes fields
 function clearContextualFields() { // Renamed function
+    if (!confirm('Are you sure you want to clear the Prompt, Fandom Context, and Notes fields? The prompt will be reset to default.')) {
+        updateStatus('Clearing contextual fields cancelled.', CONSTANTS.STATUS_TYPES.INFO);
+        return;
+    }
     console.info('[ClearContextual] Clearing prompt, fandom, and notes fields.');
     promptBox.value = '';
     fandomBox.value = '';
@@ -1358,6 +1381,18 @@ function saveTextAsFile(elementId, filename) {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(link.href); // Clean up
+
+    // Provide feedback on the button that triggered the save
+    const saveButton = document.querySelector(`button[data-target="${elementId}"]`);
+    if (saveButton) {
+        const originalButtonText = saveButton.innerHTML;
+        saveButton.innerHTML = '<i class="fas fa-check"></i> Saved!';
+        saveButton.disabled = true;
+        setTimeout(() => {
+            saveButton.innerHTML = originalButtonText;
+            saveButton.disabled = false;
+        }, 2000);
+    }
 }
 
 // Save all files as a ZIP file

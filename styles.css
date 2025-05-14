@@ -273,6 +273,11 @@ button:disabled {
     box-shadow: var(--glow-primary);
 }
 
+.primary-action-btn:active:not(:disabled) {
+    background-color: var(--primary-active);
+    transform: translateY(1px);
+}
+
 .save-btn {
     background-color: var(--success);
     color: white;
@@ -280,6 +285,11 @@ button:disabled {
 
 .save-btn:hover:not(:disabled) {
     background-color: var(--success-hover);
+}
+
+.save-btn:active:not(:disabled) {
+    background-color: var(--success-active);
+    transform: translateY(1px);
 }
 
 .action-btn {
@@ -292,6 +302,11 @@ button:disabled {
     box-shadow: var(--glow-secondary);
 }
 
+.action-btn:active:not(:disabled) {
+    background-color: var(--secondary-active);
+    transform: translateY(1px);
+}
+
 .clear-btn, .danger-btn {
     background-color: var(--danger);
     color: white;
@@ -300,6 +315,12 @@ button:disabled {
 .clear-btn:hover:not(:disabled), 
 .danger-btn:hover:not(:disabled) {
     background-color: var(--danger-hover);
+}
+
+.clear-btn:active:not(:disabled),
+.danger-btn:active:not(:disabled) {
+    background-color: var(--danger-active);
+    transform: translateY(1px);
 }
 
 /* Textarea Controls */
@@ -1030,6 +1051,8 @@ input[type="range"]::-moz-range-thumb {
 #temperature-value {
     font-weight: bold;
     color: var(--accent-color);
+    min-width: 30px; /* Ensure it has some width to prevent jumping */
+    text-align: right;
 }
 
 .temp-info {
@@ -1053,7 +1076,7 @@ input[type="range"]::-moz-range-thumb {
 .checkbox-group input[type="checkbox"] {
     width: auto; /* Override default input width */
     margin: 0;
-    accent-color: var(--accent-color);
+    accent-color: var(--accent-color); /* Ensure this is using a root variable */
     cursor: pointer;
     transform: scale(1.1); /* Slightly larger checkbox */
 }
@@ -1131,4 +1154,14 @@ body.dark-mode .summary-area button:hover {
 /* Controls Card in Status Area */
 .controls-card {
     margin-top: var(--space-md);
+}
+
+button:hover:not(:disabled) {
+    /* General hover for non-primary/action buttons if needed */
+    /* filter: brightness(1.1); */
+}
+
+button:active:not(:disabled) {
+    transform: translateY(1px);
+    filter: brightness(0.95);
 }
