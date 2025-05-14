@@ -111,6 +111,12 @@
                     </div>
                 </div>
 
+                <!-- Status Bar - Moved between input and output containers -->
+                <div class="card status-bar central-status" id="intermediate-status-bar">
+                    <p id="status-message" aria-live="polite">Ready</p>
+                    <div id="progress-indicator-container" class="progress-indicator-container"></div>
+                </div>
+
                 <!-- Output Container -->
                 <div class="output-container">
                     <div class="card output-card">
@@ -129,98 +135,102 @@
                 </div>
             </div>
 
-            <!-- Status Bar - Moved below input and output containers -->
-            <div class="card status-bar central-status">
-                <p id="status-message" aria-live="polite">Ready to translate</p>
-                <div id="progress-indicator-container" class="progress-indicator-container"></div>
-            </div>
-
             <!-- Controls Container -->
             <div class="controls-container">
-                <!-- Prompt Template Management -->
-                <div class="card">
-                    <div class="card-header">
-                        <h2><i class="fas fa-scroll"></i> Prompt Template Management</h2>
+                <!-- First Row: Prompt Template Management and Glossary -->
+                <div class="control-row">
+                    <!-- Prompt Template Management -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2><i class="fas fa-scroll"></i> Prompt Template Management</h2>
+                        </div>
+                        <div class="input-group">
+                            <label for="prompt-template-name">Prompt Name:</label>
+                            <input type="text" id="prompt-template-name" placeholder="Enter a name for this prompt">
+                        </div>
+                        <div class="textarea-controls prompt-management-controls">
+                            <button id="save-prompt-as-btn" class="action-btn"><i class="fas fa-save"></i> Save Current as New</button>
+                        </div>
+                        <div class="input-group">
+                            <label for="saved-prompts-select">Saved Prompts:</label>
+                            <select id="saved-prompts-select">
+                                <option value="">-- Select a saved prompt --</option>
+                            </select>
+                        </div>
+                        <div class="textarea-controls prompt-management-controls">
+                            <button id="load-prompt-btn" class="action-btn"><i class="fas fa-upload"></i> Load Selected</button>
+                            <button id="delete-prompt-btn" class="danger-btn"><i class="fas fa-trash-alt"></i> Delete Selected</button>
+                        </div>
+                        <textarea id="prompt-box" placeholder="Enter your detailed prompt template here..."></textarea>
+                        <div class="placeholder-buttons-container" id="prompt-placeholder-buttons">
+                            <button class="placeholder-btn" data-placeholder="{source_language}">Source Lang</button>
+                            <button class="placeholder-btn" data-placeholder="{target_language}">Target Lang</button>
+                            <button class="placeholder-btn" data-placeholder="{fandom_context}">Fandom Context</button>
+                            <button class="placeholder-btn" data-placeholder="{notes}">Notes</button>
+                            <button class="placeholder-btn" data-placeholder="{previous_chapter_summary}">Prev. Ch. Summary</button>
+                            <button class="placeholder-btn" data-placeholder="{previous_chunk_summaries}">Prev. Chunk Sums</button>
+                            <button class="placeholder-btn" data-placeholder="{source_text}">Source Text</button>
+                            <button class="placeholder-btn" data-placeholder="{glossary_terms}">Glossary Terms</button>
+                        </div>
+                        <div class="textarea-controls">
+                            <button class="save-btn" data-target="prompt-box"><i class="fas fa-save"></i> Save Prompt Text</button>
+                        </div>
                     </div>
-                    <div class="input-group">
-                        <label for="prompt-template-name">Prompt Name:</label>
-                        <input type="text" id="prompt-template-name" placeholder="Enter a name for this prompt">
-                    </div>
-                    <div class="textarea-controls prompt-management-controls">
-                        <button id="save-prompt-as-btn" class="action-btn"><i class="fas fa-save"></i> Save Current as New</button>
-                    </div>
-                    <div class="input-group">
-                        <label for="saved-prompts-select">Saved Prompts:</label>
-                        <select id="saved-prompts-select">
-                            <option value="">-- Select a saved prompt --</option>
-                        </select>
-                    </div>
-                    <div class="textarea-controls prompt-management-controls">
-                        <button id="load-prompt-btn" class="action-btn"><i class="fas fa-upload"></i> Load Selected</button>
-                        <button id="delete-prompt-btn" class="danger-btn"><i class="fas fa-trash-alt"></i> Delete Selected</button>
-                    </div>
-                    <textarea id="prompt-box" placeholder="Enter your detailed prompt template here..."></textarea>
-                    <div class="placeholder-buttons-container" id="prompt-placeholder-buttons">
-                        <button class="placeholder-btn" data-placeholder="{source_language}">Source Lang</button>
-                        <button class="placeholder-btn" data-placeholder="{target_language}">Target Lang</button>
-                        <button class="placeholder-btn" data-placeholder="{fandom_context}">Fandom Context</button>
-                        <button class="placeholder-btn" data-placeholder="{notes}">Notes</button>
-                        <button class="placeholder-btn" data-placeholder="{previous_chapter_summary}">Prev. Ch. Summary</button>
-                        <button class="placeholder-btn" data-placeholder="{previous_chunk_summaries}">Prev. Chunk Sums</button>
-                        <button class="placeholder-btn" data-placeholder="{source_text}">Source Text</button>
-                        <button class="placeholder-btn" data-placeholder="{glossary_terms}">Glossary Terms</button>
-                    </div>
-                    <div class="textarea-controls">
-                        <button class="save-btn" data-target="prompt-box"><i class="fas fa-save"></i> Save Prompt Text</button>
+
+                    <!-- Glossary / Terminology -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2><i class="fas fa-book"></i> Glossary / Terminology</h2>
+                        </div>
+                        <div class="textarea-controls glossary-ai-controls">
+                            <button id="ai-generate-glossary-btn" class="action-btn"><i class="fas fa-robot"></i> Generate Glossary with AI</button>
+                        </div>
+                        <div class="input-group">
+                            <label for="glossary-category">Category (Optional):</label>
+                            <input type="text" id="glossary-category" placeholder="e.g., Names, Locations (leave blank for default)">
+                        </div>
+                        <div class="input-group">
+                            <label for="glossary-term-source">Term (Source Language):</label>
+                            <input type="text" id="glossary-term-source" placeholder="e.g., おはよう">
+                        </div>
+                        <div class="input-group">
+                            <label for="glossary-term-target">Preferred Translation (Target Language):</label>
+                            <input type="text" id="glossary-term-target" placeholder="e.g., Good morning">
+                        </div>
+                        <div class="textarea-controls">
+                            <button id="add-glossary-term-btn" class="action-btn"><i class="fas fa-plus-circle"></i> Add Term</button>
+                        </div>
+                        <div id="glossary-display-area" class="glossary-list">
+                            <!-- Glossary terms will be listed here -->
+                            <p class="no-glossary-terms" style="display: none;">No glossary terms defined yet.</p>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Notes & Instructions -->
-                <div class="card">
-                    <div class="card-header">
-                        <h2><i class="fas fa-sticky-note"></i> Notes & Instructions</h2>
+                <!-- Second Row: Notes and Fandom Context -->
+                <div class="control-row">
+                    <!-- Notes & Instructions -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2><i class="fas fa-sticky-note"></i> Notes & Instructions</h2>
+                        </div>
+                        <textarea id="notes-box" placeholder="Enter specific instructions, voice notes, or terminology here..."></textarea>
+                        <div class="textarea-controls">
+                            <button id="clear-notes-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
+                            <button id="save-notes-btn" class="save-btn"><i class="fas fa-save"></i> Save</button>
+                        </div>
                     </div>
-                    <textarea id="notes-box" placeholder="Enter specific instructions, voice notes, or terminology here..."></textarea>
-                    <div class="textarea-controls">
-                        <button id="clear-notes-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
-                        <button id="save-notes-btn" class="save-btn"><i class="fas fa-save"></i> Save</button>
-                    </div>
-                </div>
 
-                <!-- Glossary / Terminology -->
-                <div class="card">
-                    <div class="card-header">
-                        <h2><i class="fas fa-book"></i> Glossary / Terminology</h2>
-                    </div>
-                    <div class="textarea-controls glossary-ai-controls">
-                        <button id="ai-generate-glossary-btn" class="action-btn"><i class="fas fa-robot"></i> Generate Glossary with AI</button>
-                    </div>
-                    <div class="input-group">
-                        <label for="glossary-term-source">Term (Source Language):</label>
-                        <input type="text" id="glossary-term-source" placeholder="e.g., おはよう">
-                    </div>
-                    <div class="input-group">
-                        <label for="glossary-term-target">Preferred Translation (Target Language):</label>
-                        <input type="text" id="glossary-term-target" placeholder="e.g., Good morning">
-                    </div>
-                    <div class="textarea-controls">
-                        <button id="add-glossary-term-btn" class="action-btn"><i class="fas fa-plus-circle"></i> Add Term</button>
-                    </div>
-                    <div id="glossary-display-area" class="glossary-list">
-                        <!-- Glossary terms will be listed here -->
-                        <p class="no-glossary-terms" style="display: none;">No glossary terms defined yet.</p>
-                    </div>
-                </div>
-
-                <!-- Fandom Context -->
-                <div class="card">
-                    <div class="card-header">
-                        <h2><i class="fas fa-users"></i> Fandom Context</h2>
-                    </div>
-                    <textarea id="fandom-box" placeholder="Enter fandom-specific context or terminology here..."></textarea>
-                    <div class="textarea-controls">
-                        <button id="clear-fandom-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
-                        <button class="save-btn" data-target="fandom-box"><i class="fas fa-save"></i> Save</button>
+                    <!-- Fandom Context -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2><i class="fas fa-users"></i> Fandom Context</h2>
+                        </div>
+                        <textarea id="fandom-box" placeholder="Enter fandom-specific context or terminology here..."></textarea>
+                        <div class="textarea-controls">
+                            <button id="clear-fandom-btn" class="clear-btn"><i class="fas fa-times-circle"></i> Clear</button>
+                            <button class="save-btn" data-target="fandom-box"><i class="fas fa-save"></i> Save</button>
+                        </div>
                     </div>
                 </div>
 

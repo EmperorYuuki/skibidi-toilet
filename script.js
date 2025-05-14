@@ -374,12 +374,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
-        // Add Glossary placeholder button dynamically if container exists
-        const glossaryPlaceholderBtn = document.createElement('button');
-        glossaryPlaceholderBtn.className = 'placeholder-btn';
-        glossaryPlaceholderBtn.dataset.placeholder = '{glossary_terms}';
-        glossaryPlaceholderBtn.textContent = 'Glossary Terms';
-        placeholderButtonsContainer.appendChild(glossaryPlaceholderBtn);
+        // Remove the following lines that dynamically add a glossary button
+        // const glossaryPlaceholderBtn = document.createElement('button');
+        // glossaryPlaceholderBtn.className = 'placeholder-btn';
+        // glossaryPlaceholderBtn.dataset.placeholder = '{glossary_terms}';
+        // glossaryPlaceholderBtn.textContent = 'Glossary Terms';
+        // placeholderButtonsContainer.appendChild(glossaryPlaceholderBtn);
     }
 });
 
@@ -623,11 +623,16 @@ function getWordCount(text) {
     const chineseRegex = /[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/; // Basic CJK, Full-width punctuation
     const hasChinese = chineseRegex.test(text);
 
+    console.log('[getWordCount] Testing text (first 50 chars): ', text.substring(0,50));
+    console.log('[getWordCount] Has Chinese characters:', hasChinese);
+
     if (hasChinese) {
+        console.log('[getWordCount] Using CJK counting logic.');
         // For text with Chinese characters, count non-whitespace characters.
         // This treats each Chinese character as a word and ignores spaces.
         return text.replace(/\s+/g, '').length;
     } else {
+        console.log('[getWordCount] Using non-CJK (space-splitting) counting logic.');
         // For non-Chinese text, split by spaces and filter out empty strings
         // that might result from multiple spaces.
         return text.trim().split(/\s+/).filter(word => word.length > 0).length;
@@ -1969,13 +1974,28 @@ if (interChunkSummaryToggleElement) {
 }
 
 // --- Glossary Management Functions ---
+const DEFAULT_GLOSSARY_CATEGORY = 'Ungategorized'; // Default category
+
 function getGlossary() {
     const glossaryJson = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_TERMS);
-    return glossaryJson ? JSON.parse(glossaryJson) : {};
+    if (glossaryJson) {
+        try {
+            const parsed = JSON.parse(glossaryJson);
+            // Basic validation: check if it's an object (could be more robust)
+            if (typeof parsed === 'object' && parsed !== null) {
+                return parsed;
+            }
+            console.warn('[Glossary] Parsed glossary from localStorage is not a valid object. Returning default.');
+        } catch (e) {
+            console.error('[Glossary] Error parsing glossary from localStorage. Returning default.', e);
+        }
+    }
+    return {}; // Return empty object if nothing in storage or parse error - will be populated with categories as needed
 }
 
 function saveGlossary(glossary) {
     localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.GLOSSARY_TERMS, JSON.stringify(glossary));
+    console.log('[Glossary] Glossary saved to localStorage.', glossary);
 }
 
 function renderGlossary() {
@@ -1983,75 +2003,98 @@ function renderGlossary() {
     const glossary = getGlossary();
     glossaryDisplayArea.innerHTML = ''; // Clear previous terms
 
-    if (Object.keys(glossary).length === 0) {
+    const categories = Object.keys(glossary);
+
+    if (categories.length === 0) {
         noGlossaryTermsMsg.style.display = 'block';
-        glossaryDisplayArea.appendChild(noGlossaryTermsMsg); // Re-append if it was cleared
+        glossaryDisplayArea.appendChild(noGlossaryTermsMsg);
     } else {
         noGlossaryTermsMsg.style.display = 'none';
-        const ul = document.createElement('ul');
-        ul.className = 'glossary-items-list'; // For potential styling
-        for (const term in glossary) {
-            if (glossary.hasOwnProperty(term)) {
-                const li = document.createElement('li');
-                li.className = 'glossary-item';
-                
-                const termSpan = document.createElement('span');
-                termSpan.className = 'glossary-term-source-text';
-                termSpan.textContent = term;
-                termSpan.contentEditable = "true"; // Make editable
-                termSpan.dataset.originalTerm = term; // Store original term for updates
+        categories.sort().forEach(categoryName => {
+            if (glossary.hasOwnProperty(categoryName) && Object.keys(glossary[categoryName]).length > 0) {
+                const categoryContainer = document.createElement('div');
+                categoryContainer.className = 'glossary-category-container';
 
-                const translationSpan = document.createElement('span');
-                translationSpan.className = 'glossary-term-target-text';
-                translationSpan.textContent = glossary[term];
-                translationSpan.contentEditable = "true"; // Make editable
+                const categoryHeader = document.createElement('h4');
+                categoryHeader.className = 'glossary-category-header';
+                categoryHeader.textContent = categoryName;
+                categoryContainer.appendChild(categoryHeader);
 
-                // Event listener for saving changes on blur (when focus is lost)
-                [termSpan, translationSpan].forEach(span => {
-                    span.addEventListener('blur', (event) => {
-                        const listItem = event.target.closest('.glossary-item');
-                        const originalTermKey = listItem.querySelector('.glossary-term-source-text').dataset.originalTerm;
-                        const newSourceTerm = listItem.querySelector('.glossary-term-source-text').textContent.trim();
-                        const newTargetTranslation = listItem.querySelector('.glossary-term-target-text').textContent.trim();
+                const ul = document.createElement('ul');
+                ul.className = 'glossary-items-list';
+
+                const terms = glossary[categoryName];
+                for (const term in terms) {
+                    if (terms.hasOwnProperty(term)) {
+                        const li = document.createElement('li');
+                        li.className = 'glossary-item';
                         
-                        if (!newSourceTerm || !newTargetTranslation) {
-                            updateStatus("Glossary terms cannot be empty. Reverting.", CONSTANTS.STATUS_TYPES.WARNING);
-                            // Revert to original if one part is empty
-                            const currentGlossary = getGlossary();
-                            listItem.querySelector('.glossary-term-source-text').textContent = originalTermKey;
-                            listItem.querySelector('.glossary-term-target-text').textContent = currentGlossary[originalTermKey] || '';
-                            return;
-                        }
+                        const termSpan = document.createElement('span');
+                        termSpan.className = 'glossary-term-source-text';
+                        termSpan.textContent = term;
+                        termSpan.contentEditable = "true";
+                        termSpan.dataset.originalTerm = term;
+                        termSpan.dataset.category = categoryName; // Add category to dataset
 
-                        handleEditGlossaryTerm(originalTermKey, newSourceTerm, newTargetTranslation);
-                        // Update dataset.originalTerm if source term itself was changed
-                        if (originalTermKey !== newSourceTerm) {
-                             listItem.querySelector('.glossary-term-source-text').dataset.originalTerm = newSourceTerm;
-                        }
-                    });
-                });
-                
-                const deleteBtn = document.createElement('button');
-                deleteBtn.className = 'delete-glossary-term-btn action-btn danger-btn'; // Reusing existing button styles
-                deleteBtn.innerHTML = '<i class="fas fa-trash-alt"></i>';
-                deleteBtn.dataset.term = term; // Keep using original term for delete key
-                deleteBtn.title = 'Delete term';
+                        const translationSpan = document.createElement('span');
+                        translationSpan.className = 'glossary-term-target-text';
+                        translationSpan.textContent = terms[term];
+                        translationSpan.contentEditable = "true";
+                        translationSpan.dataset.category = categoryName; // Add category to dataset
+                        translationSpan.dataset.term = term; // Add term for context on blur
 
-                li.appendChild(termSpan);
-                li.appendChild(document.createTextNode(' → '));
-                li.appendChild(translationSpan);
-                li.appendChild(deleteBtn);
-                ul.appendChild(li);
+                        [termSpan, translationSpan].forEach(span => {
+                            span.addEventListener('blur', (event) => {
+                                const listItem = event.target.closest('.glossary-item');
+                                const currentCategory = event.target.dataset.category;
+                                const originalTermKey = listItem.querySelector('.glossary-term-source-text').dataset.originalTerm;
+                                const newSourceTerm = listItem.querySelector('.glossary-term-source-text').textContent.trim();
+                                const newTargetTranslation = listItem.querySelector('.glossary-term-target-text').textContent.trim();
+                                
+                                if (!newSourceTerm || !newTargetTranslation) {
+                                    updateStatus("Glossary terms cannot be empty. Reverting.", CONSTANTS.STATUS_TYPES.WARNING);
+                                    // Revert based on the stored data
+                                    const storedGlossary = getGlossary();
+                                    listItem.querySelector('.glossary-term-source-text').textContent = originalTermKey;
+                                    listItem.querySelector('.glossary-term-target-text').textContent = storedGlossary[currentCategory]?.[originalTermKey] || '';
+                                    return;
+                                }
+                                handleEditGlossaryTerm(currentCategory, originalTermKey, newSourceTerm, newTargetTranslation);
+                            });
+                        });
+                        
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.className = 'delete-glossary-term-btn action-btn danger-btn';
+                        deleteBtn.innerHTML = '<i class="fas fa-trash-alt"></i>';
+                        deleteBtn.dataset.term = term;
+                        deleteBtn.dataset.category = categoryName; // Add category to dataset
+                        deleteBtn.title = `Delete term from ${categoryName}`;
+
+                        li.appendChild(termSpan);
+                        li.appendChild(document.createTextNode(' → '));
+                        li.appendChild(translationSpan);
+                        li.appendChild(deleteBtn);
+                        ul.appendChild(li);
+                    }
+                }
+                categoryContainer.appendChild(ul);
+                glossaryDisplayArea.appendChild(categoryContainer);
             }
-        }
-        glossaryDisplayArea.appendChild(ul);
+        });
     }
 }
 
 function handleAddGlossaryTerm() {
-    if (!glossaryTermSourceInput || !glossaryTermTargetInput) return;
+    const categoryInput = document.getElementById('glossary-category');
+    if (!glossaryTermSourceInput || !glossaryTermTargetInput || !categoryInput) return;
+
+    let categoryName = categoryInput.value.trim();
     const sourceTerm = glossaryTermSourceInput.value.trim();
     const targetTranslation = glossaryTermTargetInput.value.trim();
+
+    if (!categoryName) {
+        categoryName = DEFAULT_GLOSSARY_CATEGORY;
+    }
 
     if (!sourceTerm) {
         updateStatus('Source term cannot be empty.', CONSTANTS.STATUS_TYPES.WARNING);
@@ -2065,153 +2108,257 @@ function handleAddGlossaryTerm() {
     }
 
     const glossary = getGlossary();
-    if (glossary[sourceTerm] && glossary[sourceTerm] !== targetTranslation) {
-        if (!confirm(`The term "${sourceTerm}" already exists with translation "${glossary[sourceTerm]}". Overwrite with "${targetTranslation}"?`)) {
+
+    // Ensure the category exists as an object
+    if (!glossary[categoryName]) {
+        glossary[categoryName] = {};
+    }
+
+    if (glossary[categoryName][sourceTerm] && glossary[categoryName][sourceTerm] !== targetTranslation) {
+        if (!confirm(`The term "${sourceTerm}" in category "${categoryName}" already exists with translation "${glossary[categoryName][sourceTerm]}". Overwrite with "${targetTranslation}"?`)) {
             return;
         }
     }
 
-    glossary[sourceTerm] = targetTranslation;
+    glossary[categoryName][sourceTerm] = targetTranslation;
     saveGlossary(glossary);
     renderGlossary();
-    updateStatus(`Glossary term "${sourceTerm}" added/updated.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+    updateStatus(`Glossary term "${sourceTerm}" added/updated in category "${categoryName}".`, CONSTANTS.STATUS_TYPES.SUCCESS);
+    
+    // Clear inputs, but not category so user can add multiple terms to same category easily
     glossaryTermSourceInput.value = '';
     glossaryTermTargetInput.value = '';
+    // categoryInput.value = ''; // Optionally clear category too
     glossaryTermSourceInput.focus();
 }
 
-function handleDeleteGlossaryTerm(termToDelete) {
-    if (!confirm(`Are you sure you want to delete the glossary term "${termToDelete}"?`)) {
+function handleDeleteGlossaryTerm(categoryName, termToDelete) { // Modified signature
+    if (!confirm(`Are you sure you want to delete the glossary term "${termToDelete}\" from category "${categoryName}"?`)) {
         return;
     }
     const glossary = getGlossary();
-    if (glossary.hasOwnProperty(termToDelete)) {
-        delete glossary[termToDelete];
+    if (glossary[categoryName] && glossary[categoryName].hasOwnProperty(termToDelete)) {
+        delete glossary[categoryName][termToDelete];
+        // If category becomes empty, remove the category itself
+        if (Object.keys(glossary[categoryName]).length === 0) {
+            delete glossary[categoryName];
+        }
         saveGlossary(glossary);
-        renderGlossary(); // Re-render to reflect changes
-        updateStatus(`Glossary term "${termToDelete}" deleted.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+        renderGlossary();
+        updateStatus(`Glossary term "${termToDelete}\" from "${categoryName}" deleted.`, CONSTANTS.STATUS_TYPES.SUCCESS);
     } else {
-        updateStatus(`Error: Term "${termToDelete}" not found in glossary.`, CONSTANTS.STATUS_TYPES.ERROR);
+        updateStatus(`Error: Term "${termToDelete}\" not found in category "${categoryName}".`, CONSTANTS.STATUS_TYPES.ERROR);
     }
 }
 
 // New function to handle editing a glossary term
-function handleEditGlossaryTerm(originalSourceTerm, newSourceTerm, newTargetTranslation) {
+function handleEditGlossaryTerm(categoryName, originalSourceTerm, newSourceTerm, newTargetTranslation) { // Modified signature
     const glossary = getGlossary();
 
     if (!newSourceTerm.trim() || !newTargetTranslation.trim()) {
         updateStatus("Glossary source and target terms cannot be empty.", CONSTANTS.STATUS_TYPES.WARNING);
-        renderGlossary(); // Re-render to revert to original values if validation fails
+        renderGlossary(); // Re-render to revert
+        return;
+    }
+
+    if (!glossary[categoryName]) {
+        console.error(`[GlossaryEdit] Category "${categoryName}" not found for term "${originalSourceTerm}".`);
+        renderGlossary(); // Re-render if data is inconsistent
+        return;
+    }
+
+    // Check if the original term exists before trying to modify it
+    if (!glossary[categoryName].hasOwnProperty(originalSourceTerm)) {
+        console.warn(`[GlossaryEdit] Original term "${originalSourceTerm}\" not found in category "${categoryName}\" for editing.`);
+        // It might have been changed by another edit, so just try to add the new one if it makes sense
+        // or simply re-render to get the latest state.
+        renderGlossary();
         return;
     }
 
     // If the source term has changed, we need to delete the old entry and add a new one
-    // Otherwise, just update the translation for the existing source term
+    // Also, check if the new term name already exists in this category
     if (originalSourceTerm !== newSourceTerm) {
-        if (glossary.hasOwnProperty(newSourceTerm)) {
-            if (!confirm(`The term "${newSourceTerm}" already exists. Overwrite its translation?`)) {
+        if (glossary[categoryName].hasOwnProperty(newSourceTerm)) {
+            if (!confirm(`The term "${newSourceTerm}\" already exists in category "${categoryName}\". Overwrite its translation?`)) {
                 renderGlossary(); // Re-render to revert changes
                 return;
             }
         }
-        delete glossary[originalSourceTerm];
-        console.log(`[GlossaryEdit] Original term "${originalSourceTerm}" deleted due to rename to "${newSourceTerm}".`);
+        delete glossary[categoryName][originalSourceTerm];
+        console.log(`[GlossaryEdit] Term "${originalSourceTerm}\" in "${categoryName}\" deleted due to rename to "${newSourceTerm}".`);
     }
     
-    glossary[newSourceTerm] = newTargetTranslation;
+    glossary[categoryName][newSourceTerm] = newTargetTranslation;
     saveGlossary(glossary);
-    // No renderGlossary() here as blur event might cause issues. 
-    // The textContent is already updated. We might need a full re-render if keys change significantly.
-    // For now, direct DOM update is done by contentEditable.
-    // Let's re-render to ensure dataset.originalTerm on delete buttons is correct IF the term name changed
-    if (originalSourceTerm !== newSourceTerm) {
-        renderGlossary();
-    }
-    updateStatus(`Glossary term "${newSourceTerm}" updated.`, CONSTANTS.STATUS_TYPES.SUCCESS);
-    console.log(`[GlossaryEdit] Term "${originalSourceTerm}" updated to "${newSourceTerm} : ${newTargetTranslation}".`);
+
+    // After editing, ensure the dataset attributes are updated for subsequent edits/deletes.
+    // The blur event listener in renderGlossary updates the span's dataset.originalTerm if term changed.
+    // However, a full re-render is safer to ensure all delete buttons etc are correct.
+    renderGlossary(); 
+
+    updateStatus(`Glossary term in "${categoryName}\" updated to "${newSourceTerm}\".`, CONSTANTS.STATUS_TYPES.SUCCESS);
+    console.log(`[GlossaryEdit] Term in "${categoryName}\": "${originalSourceTerm}\" updated to "${newSourceTerm} : ${newTargetTranslation}".`);
 }
+
+// Update the event listener for delete to pass category
+document.addEventListener('DOMContentLoaded', () => {
+    // ... (other DOMContentLoaded listeners)
+    if (glossaryDisplayArea) {
+        glossaryDisplayArea.addEventListener('click', (event) => {
+            const targetButton = event.target.closest('.delete-glossary-term-btn');
+            if (targetButton) {
+                const termToDelete = targetButton.dataset.term;
+                const categoryName = targetButton.dataset.category; // Get category from button
+                if (termToDelete && categoryName) {
+                    handleDeleteGlossaryTerm(categoryName, termToDelete);
+                } else {
+                    console.warn('[GlossaryDeleteBtn] Missing term or category data on delete button.', targetButton.dataset);
+                }
+            }
+        });
+    }
+    // ...
+});
 
 // --- AI Glossary Generation Function ---
 async function handleAIGlossaryGeneration() {
     console.info('[AIGlossary] Initiating AI glossary generation...');
+    const AI_GENERATED_CATEGORY = "AI Suggested"; // Define a category for AI terms
+
+    // ... (rest of the initial checks and setup for sourceText, model, etc.) ...
     if (!translationBox || !modelSelect) {
         updateStatus("Cannot generate glossary: Missing required elements (source text or model select).", CONSTANTS.STATUS_TYPES.ERROR);
         return;
     }
 
-    const sourceText = translationBox.value.trim();
+    const originalSourceText = translationBox.value.trim();
     const fandomContext = fandomBox.value.trim() || CONSTANTS.DEFAULT_VALUES.FANDOM_CONTEXT;
     const notes = notesBox.value.trim() || CONSTANTS.DEFAULT_VALUES.NOTES;
     const selectedModel = modelSelect.value;
     const sourceLanguage = sourceLanguageInput.value.trim() || CONSTANTS.DEFAULT_VALUES.SOURCE_LANGUAGE;
-    const targetLanguage = targetLanguageInput ? (targetLanguageInput.textContent || 'English') : 'English'; // Assuming English default
-    const temperature = 0.3; // Lower temperature for more factual extraction
+    const targetLanguage = targetLanguageInput ? (targetLanguageInput.textContent || 'English') : 'English';
+    const temperature = 0.3;
 
-    if (!sourceText) {
+    if (!originalSourceText) {
         updateStatus('Please enter source text to generate glossary from.', CONSTANTS.STATUS_TYPES.WARNING);
-        console.warn('[AIGlossary] No source text provided.');
         return;
     }
 
-    updateStatus('Generating glossary with AI...', CONSTANTS.STATUS_TYPES.PROCESSING);
+    updateStatus('Preparing to generate glossary with AI...', CONSTANTS.STATUS_TYPES.PROCESSING);
     const aiGenerateGlossaryBtn = document.getElementById('ai-generate-glossary-btn');
     if (aiGenerateGlossaryBtn) aiGenerateGlossaryBtn.disabled = true;
 
-    const prompt = CONSTANTS.PROMPTS.AI_GLOSSARY_GENERATION
-        .replace(/{source_language}/g, sourceLanguage)
-        .replace(/{target_language}/g, targetLanguage)
-        .replace(/{fandom_context}/g, fandomContext)
-        .replace(/{notes}/g, notes)
-        .replace(/{source_text}/g, sourceText);
+    let overallSuccess = true;
+    let abortControllerForGlossary = new AbortController();
 
     try {
-        const aiResponse = await getTranslation(prompt, selectedModel, temperature, false, null, abortController ? abortController.signal : null);
-        
-        if (!aiResponse || aiResponse.trim().toLowerCase() === "no specific glossary terms identified.") {
-            updateStatus("AI did not identify any specific glossary terms.", CONSTANTS.STATUS_TYPES.INFO);
-            console.info('[AIGlossary] AI found no terms.');
-            return; // Added return here
+        const textChunks = await createTextChunks(originalSourceText, selectedModel);
+        if (textChunks.length === 0) {
+            updateStatus('No text to process for glossary generation.', CONSTANTS.STATUS_TYPES.INFO);
+            if (aiGenerateGlossaryBtn) aiGenerateGlossaryBtn.disabled = false;
+            return; 
         }
+        
+        updateStatus(`Starting glossary generation for ${textChunks.length} chunks...`, CONSTANTS.STATUS_TYPES.PROCESSING);
+        const allIdentifiedTerms = {}; // Collect all terms here { source: target }
+        let totalChunksProcessed = 0;
 
-        const lines = aiResponse.trim().split('\n'); // Simpler split for lines, assuming AI follows \n for newlines.
+        for (let i = 0; i < textChunks.length; i++) {
+            // ... (abort checks, chunk processing, prompt creation) ...
+            if (abortControllerForGlossary.signal.aborted) {
+                console.info('[AIGlossary] Glossary generation aborted by user during chunk processing.');
+                overallSuccess = false;
+                break;
+            }
+            const chunkTextToAnalyze = textChunks[i];
+            const chunkNumber = i + 1;
+            updateStatus(`Generating glossary for chunk ${chunkNumber} of ${textChunks.length}...`, CONSTANTS.STATUS_TYPES.PROCESSING, 0);
+            const prompt = CONSTANTS.PROMPTS.AI_GLOSSARY_GENERATION
+                .replace(/{source_language}/g, sourceLanguage)
+                .replace(/{target_language}/g, targetLanguage)
+                .replace(/{fandom_context}/g, fandomContext)
+                .replace(/{notes}/g, notes)
+                .replace(/{source_text}/g, chunkTextToAnalyze);
 
-        let termsAddedCount = 0;
-        const currentGlossary = getGlossary();
+            try {
+                const aiResponse = await getTranslation(prompt, selectedModel, temperature, false, null, abortControllerForGlossary.signal);
+                if (abortControllerForGlossary.signal.aborted) { overallSuccess = false; break; }
 
-        for (const line of lines) {
-            const parts = line.split(':');
-            if (parts.length >= 2) {
-                const sourceTerm = parts[0].trim();
-                const targetTranslation = parts.slice(1).join(':').trim(); // Join back in case translation has colons
-
-                if (sourceTerm && targetTranslation) {
-                    if (currentGlossary.hasOwnProperty(sourceTerm) && currentGlossary[sourceTerm] !== targetTranslation) {
-                        // Maybe ask user if they want to overwrite? For now, AI suggestions won't overwrite existing different translations.
-                        console.warn(`[AIGlossary] Term "${sourceTerm}" already exists with a different translation. AI suggestion skipped.`);
-                        continue;
+                if (aiResponse && aiResponse.trim().toLowerCase() !== "no specific glossary terms identified.") {
+                    const lines = aiResponse.trim().split('\n');
+                    for (const line of lines) {
+                        const parts = line.split(':');
+                        if (parts.length >= 2) {
+                            const sourceTerm = parts[0].trim();
+                            const targetTranslation = parts.slice(1).join(':').trim();
+                            if (sourceTerm && targetTranslation) {
+                                allIdentifiedTerms[sourceTerm] = targetTranslation; // Overwrite if duplicate, take latest from AI
+                            }
+                        }
                     }
-                    currentGlossary[sourceTerm] = targetTranslation;
-                    termsAddedCount++;
                 }
+                totalChunksProcessed++;
+            } catch (chunkError) {
+                // ... (error handling for chunkError) ...
+                if (chunkError.name === 'AbortError') {
+                    console.info(`[AIGlossary Chunk ${chunkNumber}] Aborted by user.`);
+                } else {
+                    console.error(`[AIGlossary Chunk ${chunkNumber}] Error:`, chunkError);
+                    updateStatus(`Error on glossary chunk ${chunkNumber}: ${chunkError.message}`, CONSTANTS.STATUS_TYPES.ERROR, 10000);
+                }
+                if (abortControllerForGlossary.signal.aborted) break;
             }
         }
-
-        if (termsAddedCount > 0) {
-            saveGlossary(currentGlossary);
-            renderGlossary();
-            updateStatus(`AI generated and added ${termsAddedCount} glossary term(s).`, CONSTANTS.STATUS_TYPES.SUCCESS);
-            console.info(`[AIGlossary] Added ${termsAddedCount} terms from AI.`);
-        } else {
-            updateStatus("AI response could not be parsed into glossary terms, or no new terms were found.", CONSTANTS.STATUS_TYPES.INFO);
-            console.info('[AIGlossary] No new terms added after parsing AI response.');
+        
+        if (Object.keys(allIdentifiedTerms).length > 0) {
+            const currentGlossary = getGlossary();
+            if (!currentGlossary[AI_GENERATED_CATEGORY]) {
+                currentGlossary[AI_GENERATED_CATEGORY] = {};
+            }
+            let newTermsAddedCount = 0;
+            for (const sourceTerm in allIdentifiedTerms) {
+                if (allIdentifiedTerms.hasOwnProperty(sourceTerm)) {
+                    const targetTranslation = allIdentifiedTerms[sourceTerm];
+                    // Add to AI_GENERATED_CATEGORY, overwriting if already there under this category from a previous AI run
+                    currentGlossary[AI_GENERATED_CATEGORY][sourceTerm] = targetTranslation;
+                    newTermsAddedCount++; // Count every term identified by AI as an addition/update to this category
+                }
+            }
+            if (newTermsAddedCount > 0) {
+                saveGlossary(currentGlossary);
+                renderGlossary();
+                updateStatus(`AI processed ${totalChunksProcessed}/${textChunks.length} chunks and added/updated ${newTermsAddedCount} term(s) to '${AI_GENERATED_CATEGORY}'.`, CONSTANTS.STATUS_TYPES.SUCCESS);
+            } else {
+                 updateStatus(`AI processed ${totalChunksProcessed}/${textChunks.length} chunks. No new terms were identified by AI.`, CONSTANTS.STATUS_TYPES.INFO);
+            }
+        } else if (overallSuccess && totalChunksProcessed === textChunks.length) {
+             updateStatus(`AI processed all ${textChunks.length} chunks. No specific glossary terms were identified.`, CONSTANTS.STATUS_TYPES.INFO);
+        } else if (!overallSuccess) {
+            updateStatus(`Glossary generation stopped or completed with errors after processing ${totalChunksProcessed}/${textChunks.length} chunks.`, CONSTANTS.STATUS_TYPES.WARNING);
         }
 
-    } catch (error) {
-        console.error('[AIGlossary] Error generating glossary:', error);
-        updateStatus('Error generating glossary with AI: ' + error.message, CONSTANTS.STATUS_TYPES.ERROR);
+    } catch (error) { 
+        console.error('[AIGlossary] General error during AI glossary generation setup:', error);
+        updateStatus('Error setting up AI glossary generation: ' + error.message, CONSTANTS.STATUS_TYPES.ERROR);
     } finally {
         if (aiGenerateGlossaryBtn) aiGenerateGlossaryBtn.disabled = false;
-        console.log('[AIGlossary] AI glossary generation finished (finally block).');
+        // Hook into stopBtn - this simple hook might be problematic if stopBtn is clicked for other reasons.
+        // A dedicated stop button for AI glossary might be better in the long run.
+        if (stopBtn && !translationInProgress) {
+            const originalStopAction = stopBtn.onclick;
+            stopBtn.onclick = () => {
+                if (abortControllerForGlossary && !abortControllerForGlossary.signal.aborted) {
+                    abortControllerForGlossary.abort();
+                }
+                if (typeof originalStopAction === 'function') originalStopAction();
+                stopBtn.onclick = originalStopAction;
+            };
+        } else if (stopBtn && translationInProgress && abortControllerForGlossary && !abortControllerForGlossary.signal.aborted) {
+            // If translation is running, the main abortController will handle it.
+            // We might also want to abort glossary if it was somehow running concurrently, though current design is sequential.
+            // For now, let main translation stop handle it. Consider a more robust state management if they can run truly concurrently.
+        }
     }
 }
 // --- End of AI Glossary Generation Function ---
