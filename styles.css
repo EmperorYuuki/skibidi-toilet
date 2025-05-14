@@ -370,6 +370,31 @@ button:disabled {
     flex-direction: column;
 }
 
+/* Styles for the status bar when it's inside the output-area card */
+.output-area > .status-bar {
+    padding: var(--space-sm); /* Reduced padding */
+    margin-bottom: var(--space-sm); /* Space before the output header */
+    border: none; /* Remove card border if it was a card itself */
+    box-shadow: none; /* Remove card shadow if it was a card itself */
+    background-color: transparent; /* Make its background transparent if it was a card */
+    text-align: left; /* Align text to the left, or center if preferred */
+}
+
+.output-area > .status-bar #status-message {
+    font-size: 0.9rem;
+    /* color: var(--text-muted); Default, can be overridden by status types */
+}
+
+.output-area > .status-bar .progress-indicator-container {
+    margin-top: var(--space-xs);
+    font-size: 0.8rem;
+}
+
+.output-area > .status-bar .progress-bar-bg {
+    height: 8px; /* Slightly thinner progress bar */
+    margin-top: var(--space-xs);
+}
+
 .output-box {
     width: 100%;
     min-height: 300px;
@@ -1164,4 +1189,36 @@ button:hover:not(:disabled) {
 button:active:not(:disabled) {
     transform: translateY(1px);
     filter: brightness(0.95);
+}
+
+/* Placeholder Buttons */
+.placeholder-buttons-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    margin-top: var(--space-sm);
+    margin-bottom: var(--space-sm); /* Add some margin below the buttons */
+}
+
+.placeholder-btn {
+    background-color: var(--input-bg);
+    color: var(--text-muted);
+    border: 1px solid var(--border-subtle);
+    padding: var(--space-xs) var(--space-sm);
+    font-size: 0.8rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.placeholder-btn:hover {
+    background-color: var(--input-focus-bg);
+    color: var(--text-bright);
+    border-color: var(--primary);
+}
+
+.placeholder-btn:active {
+    transform: scale(0.95);
+    background-color: var(--primary-active);
+    color: white;
 }

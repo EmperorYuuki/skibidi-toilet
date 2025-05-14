@@ -120,9 +120,18 @@
                         <button id="load-prompt-btn" class="action-btn"><i class="fas fa-upload"></i> Load Selected</button>
                         <button id="delete-prompt-btn" class="danger-btn"><i class="fas fa-trash-alt"></i> Delete Selected</button>
                     </div>
-                    <textarea id="prompt-box" placeholder="Edit the translation prompt template here..."></textarea> 
+                    <textarea id="prompt-box" placeholder="Enter your detailed prompt template here..."></textarea>
+                    <div class="placeholder-buttons-container" id="prompt-placeholder-buttons">
+                        <button class="placeholder-btn" data-placeholder="{source_language}">Source Lang</button>
+                        <button class="placeholder-btn" data-placeholder="{target_language}">Target Lang</button>
+                        <button class="placeholder-btn" data-placeholder="{fandom_context}">Fandom Context</button>
+                        <button class="placeholder-btn" data-placeholder="{notes}">Notes</button>
+                        <button class="placeholder-btn" data-placeholder="{previous_chapter_summary}">Prev. Ch. Summary</button>
+                        <button class="placeholder-btn" data-placeholder="{previous_chunk_summaries}">Prev. Chunk Sums</button>
+                        <button class="placeholder-btn" data-placeholder="{source_text}">Source Text</button>
+                    </div>
                     <div class="textarea-controls">
-                        <button class="save-btn" data-target="prompt-box"><i class="fas fa-download"></i> Save Current to File</button>
+                        <button class="save-btn" data-target="prompt-box"><i class="fas fa-save"></i> Save Prompt Text</button>
                     </div>
                 </div>
 
@@ -139,16 +148,18 @@
             </div>
             
             <div class="right-panel">
-                <div class="card output-area">
-                    <div class="card-header">
-                        <h2><i class="fas fa-language"></i> Translated Text</h2>
-                        <div class="word-counter" id="output-word-count">
-                            0 words | 0 chars
-                        </div>
+                <div class="card output-area" id="output-area">
+                    <div class="card status-bar">
+                        <p id="status-message">Ready to translate</p>
+                        <div id="progress-indicator-container" class="progress-indicator-container"></div>
                     </div>
-                    <div id="output-box" class="output-box" contenteditable="true" placeholder="Translation will appear here..."></div>
-                    <div class="textarea-controls">
-                        <button id="copy-output-btn" class="action-btn"><i class="fas fa-copy"></i> Copy</button>
+                    <div class="card-header">
+                        <h2><i class="fas fa-language"></i> Translation Output</h2>
+                        <div class="word-counter" id="output-word-count">0 words | 0 chars</div>
+                    </div>
+                    <div class="output-box" id="output-box" contenteditable="true" placeholder="Translation will appear here..."></div>
+                    <div class="textarea-controls output-controls">
+                        <button id="copy-output-btn" class="action-btn"><i class="fas fa-copy"></i> Copy Output</button>
                         <button id="save-output-btn" class="save-btn" data-target="output-box"><i class="fas fa-save"></i> Save</button>
                         <button id="generate-summary-btn" class="primary-action-btn"><i class="fas fa-list-alt"></i> Generate Summary</button>
                         <button id="clear-output-area-btn" class="action-btn clear-btn"><i class="fas fa-trash-alt"></i> Clear Output</button>
@@ -181,11 +192,6 @@
         </div>
         
         <div class="status-area">
-            <div class="card status-bar">
-                <p id="status-message">Ready to translate</p>
-                <div id="progress-indicator-container" class="progress-indicator-container"></div>
-            </div>
-            
             <div class="card controls-card">
                 <div class="app-controls">
                     <button id="save-all-btn" class="action-btn"><i class="fas fa-download"></i> Export All Settings</button>

@@ -279,6 +279,40 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
     console.info('Application initialization complete.');
 });
 
+// Function to insert text at cursor position in a textarea
+function insertTextAtCursor(textarea, textToInsert) {
+    if (!textarea) return;
+
+    const startPos = textarea.selectionStart;
+    const endPos = textarea.selectionEnd;
+    const currentText = textarea.value;
+
+    textarea.value = currentText.substring(0, startPos) + textToInsert + currentText.substring(endPos);
+
+    // Move cursor to after the inserted text
+    textarea.focus();
+    textarea.selectionStart = textarea.selectionEnd = startPos + textToInsert.length;
+
+    // Trigger input event for auto-save and word count
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// Event listeners for placeholder buttons
+document.addEventListener('DOMContentLoaded', () => {
+    const placeholderButtonsContainer = document.getElementById('prompt-placeholder-buttons');
+    if (placeholderButtonsContainer) {
+        const placeholderButtons = placeholderButtonsContainer.querySelectorAll('.placeholder-btn');
+        placeholderButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const placeholder = button.getAttribute('data-placeholder');
+                if (promptBox && placeholder) {
+                    insertTextAtCursor(promptBox, placeholder);
+                }
+            });
+        });
+    }
+});
+
 // ... other event listeners ...
 
 // Remove individual non-debounced input listeners for auto-save, rely on textAreasForAutoSave loop below
