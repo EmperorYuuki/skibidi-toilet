@@ -48,6 +48,9 @@ const deletePromptBtn = document.getElementById('delete-prompt-btn');
 // Clear All button from the main app controls
 const clearAllAppBtn = document.getElementById('clear-all-btn'); 
 
+// OpenRouter API Key Input
+const openrouterApiKeyInput = document.getElementById('openrouter-api-key');
+
 // --- Constants ---
 const CONSTANTS = {
     STATUS_TYPES: {
@@ -85,6 +88,7 @@ const CONSTANTS = {
         TEMPERATURE: 'temperature',
         GROK_API_KEY: 'grokApiKey',
         DEEPSEEK_API_KEY: 'deepseekApiKey',
+        OPENROUTER_API_KEY: 'openrouterApiKey', // New key for OpenRouter
         SAVED_PROMPTS: 'fanficTranslatorSavedPrompts',
         INTER_CHUNK_SUMMARY_ENABLED: 'interChunkSummaryEnabled', // New key
         GLOSSARY_TERMS: 'fanficTranslatorGlossary', // Key for glossary
@@ -95,22 +99,25 @@ const CONSTANTS = {
     PROJECT_STORAGE: {
         ACTIVE_PROJECT_ID: 'fanficTranslatorActiveProject',
         PROJECT_LIST: 'fanficTranslatorProjects',
-        GLOBAL_KEYS: ['grokApiKey', 'deepseekApiKey'] // Keys that are not project-specific
+        GLOBAL_KEYS: ['grokApiKey', 'deepseekApiKey', 'openrouterApiKey'] // Added OpenRouter API key
     },
     API_KEY_PLACEHOLDERS: {
         GROK: 'YOUR_GROK_API_KEY',
-        DEEPSEEK: 'YOUR_DEEPSEEK_API_KEY'
+        DEEPSEEK: 'YOUR_DEEPSEEK_API_KEY',
+        OPENROUTER: 'YOUR_OPENROUTER_API_KEY' // New placeholder for OpenRouter
     },
     MODELS: {
         GROK_PREFIX: 'grok-',
         DEEPSEEK_CHAT: 'deepseek-chat',
+        OPENROUTER_PREFIX: 'openrouter/', // New prefix for OpenRouter models
         DEFAULT_MAX_OUTPUT_TOKENS_GROK: 131072, // Reverted to original value
-        DEFAULT_MAX_OUTPUT_TOKENS_DEEPSEEK: 8000   // Added
+        DEFAULT_MAX_OUTPUT_TOKENS_DEEPSEEK: 8000,   // Added
+        DEFAULT_MAX_OUTPUT_TOKENS_OPENROUTER: 8000 // Default for OpenRouter, adjust as needed
     },
     CHUNKING: { // Added new category for chunking constants
         DEFAULT_GROK_TARGET_TOKENS: 22000,
         DEFAULT_DEEPSEEK_TARGET_TOKENS: 6000,
-        CHARS_PER_TOKEN_ESTIMATE: 4
+        DEFAULT_OPENROUTER_TARGET_TOKENS: 7000 // Default for OpenRouter, adjust as needed
     },
     UI: {
         DEFAULT_STATUS_MESSAGE: 'Ready'
@@ -1007,6 +1014,9 @@ const ProjectManager = {
 // These will be populated from localStorage by loadFromLocalStorage
 let grokApiKey = ''; 
 let deepseekApiKey = '';
+let openrouterApiKey = ''; // New variable for OpenRouter API key
+
+let openRouterModelData = {}; // To store fetched OpenRouter model details
 
 // Add a global variable for the tokenizer server URL
 let tokenizerServerUrl = null; // Default to null, to be set by config
@@ -1048,7 +1058,14 @@ const modelPricing = {
     'grok-3-mini-fast-latest':  { input: '$0.60', completion: '$4.00', context: '131k' },
     // DeepSeek (Placeholder - update if you have real data)
     'deepseek-chat':            { input: '$0.27', completion: '$1.10', context: '64k' }, // Standard Price (Cache Miss)
-};
+    // OpenRouter - Prices vary by model, these are examples per 1M tokens (Input/Output)
+    'openrouter/anthropic/claude-3-haiku-20240307': { input: '$0.25', completion: '$1.25', context: '200k' },
+    'openrouter/google/gemini-pro-1.5':             { input: '$0.50', completion: '$1.50', context: '1M' }, // Example price, check OpenRouter for specifics
+    'openrouter/mistralai/mistral-7b-instruct':     { input: '$0.07', completion: '$0.07', context: '32k' },
+    'openrouter/openai/gpt-3.5-turbo':              { input: '$0.50', completion: '$1.50', context: '16k' }, // Prices subject to change
+    'openrouter/openai/gpt-4-turbo':                { input: '$10.00', completion: '$30.00', context: '128k' },
+    // OpenRouter prices will be fetched dynamically
+}; 
 
 // Function to load tunnel configuration
 async function loadTunnelConfig() {
@@ -1133,17 +1150,28 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
 
         // Load saved state first
         console.info('[DOMReady] Phase 2: Loading user data from local storage...');
-        loadFromLocalStorage();
+        loadFromLocalStorage(); // This now also populates API keys into their modal inputs
         
         // Check if keys are present and update UI accordingly
         console.info('[DOMReady] Phase 3: Checking API keys and updating UI...');
         checkApiKey(); // This also updates the status message initially
         
-        // Update pricing display based on loaded model
-        console.info('[DOMReady] Phase 4: Updating model pricing display...');
+        // Update pricing display based on loaded model (initial call)
+        console.info('[DOMReady] Phase 4: Updating model pricing display (initial)...');
         updatePricingDisplay();
 
-        console.info('[DOMReady] Phase 5: Attaching event listeners...');
+        // Load OpenRouter models dynamically
+        console.info('[DOMReady] Phase 5: Loading OpenRouter Models...');
+        await loadOpenRouterModels(); 
+        // After models are loaded, if an OpenRouter model was pre-selected from localStorage,
+        // its pricing might not have been available. Re-run updatePricingDisplay.
+        if (modelSelect.value && modelSelect.value.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
+            console.info('[DOMReady] Re-updating pricing display after OpenRouter models loaded.');
+            updatePricingDisplay();
+        }
+
+
+        console.info('[DOMReady] Phase 6: Attaching event listeners...');
         // Add event listeners for buttons with null checks
         if (translateBtn) translateBtn.addEventListener('click', handleTranslation);
         if (clearBtn) clearBtn.addEventListener('click', clearContextualFields); // Renamed function call
@@ -1413,6 +1441,12 @@ function checkApiKey() {
             apiKeyMissing = true;
             specificMessage = 'DeepSeek API key is not set. Configure in settings if using DeepSeek.';
         }
+    // Check OpenRouter models
+    } else if (selectedModel.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
+        if (!openrouterApiKey || openrouterApiKey === CONSTANTS.API_KEY_PLACEHOLDERS.OPENROUTER) {
+            apiKeyMissing = true;
+            specificMessage = 'OpenRouter API key is not set. Configure in settings if using OpenRouter models.';
+        }
     }
 
     if (apiKeyMissing) {
@@ -1479,11 +1513,33 @@ function appendSummaryToTextarea(textareaElement, summaryText, storageKey, field
 // Update pricing display based on selected model
 function updatePricingDisplay() {
     const selectedModel = modelSelect.value;
-    if (modelPricing[selectedModel]) {
+    if (!pricingDisplay) return; // Ensure the element exists
+
+    if (modelPricing[selectedModel]) { // For Grok and DeepSeek (hardcoded ones)
         const price = modelPricing[selectedModel];
         pricingDisplay.innerHTML = `Input: ${price.input}/1M tokens, Completion: ${price.completion}/1M tokens, Context: ${price.context}`;
+    } else if (selectedModel.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX) && openRouterModelData[selectedModel]) {
+        // For dynamically loaded OpenRouter models
+        const modelData = openRouterModelData[selectedModel];
+        const inputCost = modelData.pricing?.input ? `$${parseFloat(modelData.pricing.input).toFixed(2)}` : 'N/A';
+        const outputCost = modelData.pricing?.output ? `$${parseFloat(modelData.pricing.output).toFixed(2)}` : 'N/A';
+        // Format context length: if it's a large number, show as 'XK' or 'XM'
+        let contextWindow = 'N/A';
+        if (modelData.context_length) {
+            if (modelData.context_length >= 1000000) { // For millions
+                contextWindow = `${(modelData.context_length / 1000000).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 1})}M`;
+            } else if (modelData.context_length >= 1000) { // For thousands
+                 contextWindow = `${(modelData.context_length / 1000).toLocaleString()}k`;
+            } else {
+                contextWindow = modelData.context_length.toLocaleString(); // For smaller numbers
+            }
+        }
+        pricingDisplay.innerHTML = `Input: ${inputCost}/1M, Output: ${outputCost}/1M, Context: ${contextWindow}`;
+    } else if (selectedModel.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
+        // This case handles when an OpenRouter model is selected but its data hasn't loaded yet or is missing
+        pricingDisplay.innerHTML = 'OpenRouter model: pricing/context info loading or unavailable.';
     } else {
-        pricingDisplay.innerHTML = 'Pricing info not available.';
+        pricingDisplay.innerHTML = 'Pricing info not available for this model.';
     }
 }
 
@@ -1580,6 +1636,9 @@ async function createTextChunks(text, modelName) {
     } else if (modelName === CONSTANTS.MODELS.DEEPSEEK_CHAT) {
         maxTokens = CONSTANTS.CHUNKING.DEFAULT_DEEPSEEK_TARGET_TOKENS;
         console.log(`[Chunker] Using DeepSeek model, setting max tokens for chunking to ${maxTokens}`);
+    } else if (modelName.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
+        maxTokens = CONSTANTS.CHUNKING.DEFAULT_OPENROUTER_TARGET_TOKENS;
+        console.log(`[Chunker] Using OpenRouter model (${modelName}), setting max tokens for chunking to ${maxTokens}`);
     } else {
         console.error('[Chunker] Unknown model type for chunking:', modelName);
         // For unknown models, return the original text as a single chunk if it's not empty.
@@ -2169,6 +2228,22 @@ function getApiConfig(model, prompt, temperature, stream) {
             stream: stream,
             max_tokens: CONSTANTS.MODELS.DEFAULT_MAX_OUTPUT_TOKENS_DEEPSEEK 
         };
+    } else if (model.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
+        apiUrl = 'https://openrouter.ai/api/v1/chat/completions';
+        apiKey = openrouterApiKey;
+        requestBody = {
+            model: model.substring(CONSTANTS.MODELS.OPENROUTER_PREFIX.length), // e.g., "anthropic/claude-3-haiku-20240307"
+            messages: [{ role: "user", content: prompt }],
+            temperature: temperature,
+            stream: stream,
+            max_tokens: CONSTANTS.MODELS.DEFAULT_MAX_OUTPUT_TOKENS_OPENROUTER,
+            // Optional: OpenRouter specific headers can be added here if needed by their API for routing/tracking
+            // route: "fallback", // example, see OpenRouter docs for more
+            // headers: {
+            //    "HTTP-Referer": "YOUR_SITE_URL", // Replace with your actual site URL
+            //    "X-Title": "Fanfic Translator" // Replace with your app name
+            // }
+        };
     } else {
         throw new Error(`Unsupported model selected: ${model}`);
     }
@@ -2256,8 +2331,12 @@ async function getTranslation(prompt, model, temperature, stream = false, update
 
     if (!apiKey || 
         (model.startsWith(CONSTANTS.MODELS.GROK_PREFIX) && apiKey === CONSTANTS.API_KEY_PLACEHOLDERS.GROK) || 
-        (model === CONSTANTS.MODELS.DEEPSEEK_CHAT && apiKey === CONSTANTS.API_KEY_PLACEHOLDERS.DEEPSEEK)) {
-        const specificKeyError = model.startsWith(CONSTANTS.MODELS.GROK_PREFIX) ? "Grok API key not set." : "DeepSeek API key not set.";
+        (model === CONSTANTS.MODELS.DEEPSEEK_CHAT && apiKey === CONSTANTS.API_KEY_PLACEHOLDERS.DEEPSEEK) ||
+        (model.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX) && apiKey === CONSTANTS.API_KEY_PLACEHOLDERS.OPENROUTER)) {
+        let specificKeyError = "API key not set.";
+        if (model.startsWith(CONSTANTS.MODELS.GROK_PREFIX)) specificKeyError = "Grok API key not set.";
+        else if (model === CONSTANTS.MODELS.DEEPSEEK_CHAT) specificKeyError = "DeepSeek API key not set.";
+        else if (model.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) specificKeyError = "OpenRouter API key not set.";
         throw new Error(`API key is not set properly. ${specificKeyError} Please check the API key configuration.`);
     }
 
@@ -2265,6 +2344,12 @@ async function getTranslation(prompt, model, temperature, stream = false, update
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
     };
+
+    // Add OpenRouter specific headers if applicable
+    if (model.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
+        // headers['HTTP-Referer'] = 'YOUR_SITE_URL'; // Replace with your actual site URL or a variable
+        // headers['X-Title'] = 'Fanfic Translator'; // Replace with your app name or a variable
+    }
 
     console.log(`Sending ${stream ? 'streaming' : 'non-streaming'} request to ${apiUrl} for model ${model}. Body hidden for brevity if large.`);
     // To log the full body for debugging, uncomment the next line and comment out the one above.
@@ -2401,6 +2486,7 @@ function handleResetAllApplicationData() {
         // Also clear API keys from memory
         grokApiKey = '';
         deepseekApiKey = '';
+        openrouterApiKey = ''; // Clear OpenRouter API key
 
         // Reload the page to apply defaults and clear state thoroughly
         updateStatus('Application data reset. Reloading page...', CONSTANTS.STATUS_TYPES.SUCCESS, 2000);
@@ -2522,7 +2608,7 @@ function saveToLocalStorage(key, value) {
     try {
         localStorage.setItem(storageKey, valueToStore);
         // Avoid logging the actual value for potentially large content like promptContent or translationContent
-        if (key === CONSTANTS.LOCAL_STORAGE_KEYS.GROK_API_KEY || key === CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY) {
+        if (key === CONSTANTS.LOCAL_STORAGE_KEYS.GROK_API_KEY || key === CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY || key === CONSTANTS.LOCAL_STORAGE_KEYS.OPENROUTER_API_KEY) {
             console.log(`[LocalStorage] Saved ${storageKey}: (API key - value not logged)`);
         } else if (valueToStore && valueToStore.length > 100) { // Heuristic for large content
             console.log(`[LocalStorage] Saved ${storageKey}: (large content - value not logged, length: ${valueToStore.length})`);
@@ -2543,8 +2629,10 @@ function loadFromLocalStorage() {
         // Load global settings (API keys)
         let loadedGrokKey = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.GROK_API_KEY) || ''; 
         let loadedDeepSeekKey = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY) || '';
+        let loadedOpenrouterKey = localStorage.getItem(CONSTANTS.LOCAL_STORAGE_KEYS.OPENROUTER_API_KEY) || ''; // Load OpenRouter key
         grokApiKey = loadedGrokKey;
         deepseekApiKey = loadedDeepSeekKey;
+        openrouterApiKey = loadedOpenrouterKey; // Assign OpenRouter key
         console.log('[LocalStorage] API Keys loaded (values not displayed).');
 
         // Helper function to get the project-scoped key
@@ -2560,6 +2648,7 @@ function loadFromLocalStorage() {
         const saveApiKeysBtn = document.getElementById('save-api-keys');
         const grokApiKeyInput = document.getElementById('grok-api-key');
         const deepseekApiKeyInput = document.getElementById('deepseek-api-key');
+        const openrouterApiKeyInputFromModal = document.getElementById('openrouter-api-key'); // Get new input from modal
         const headerApiBtn = document.getElementById('api-keys-btn'); // This is the button in the main app header
 
         let focusedElementBeforeModal = null; // To store focus before modal opens
@@ -2569,6 +2658,7 @@ function loadFromLocalStorage() {
 
             if (grokApiKeyInput) grokApiKeyInput.value = grokApiKey;
             if (deepseekApiKeyInput) deepseekApiKeyInput.value = deepseekApiKey;
+            if (openrouterApiKeyInputFromModal) openrouterApiKeyInputFromModal.value = openrouterApiKey; // Populate OpenRouter key
             
             const openModalButtons = [];
             // Check if these buttons exist before adding listeners
@@ -2623,11 +2713,14 @@ function loadFromLocalStorage() {
             if (saveApiKeysBtn) saveApiKeysBtn.addEventListener('click', () => {
                 let currentGrokKey = grokApiKeyInput ? grokApiKeyInput.value.trim() : '';
                 let currentDeepSeekKey = deepseekApiKeyInput ? deepseekApiKeyInput.value.trim() : '';
+                let currentOpenrouterKey = openrouterApiKeyInputFromModal ? openrouterApiKeyInputFromModal.value.trim() : ''; // Get OpenRouter key
                 
                 localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.GROK_API_KEY, currentGrokKey);
                 localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.DEEPSEEK_API_KEY, currentDeepSeekKey);
+                localStorage.setItem(CONSTANTS.LOCAL_STORAGE_KEYS.OPENROUTER_API_KEY, currentOpenrouterKey); // Save OpenRouter key
                 grokApiKey = currentGrokKey;
                 deepseekApiKey = currentDeepSeekKey;
+                openrouterApiKey = currentOpenrouterKey; // Assign OpenRouter key to global variable
                 
                 if (apiSettingsModal) apiSettingsModal.style.display = 'none';
                 updateStatus('API keys saved successfully', CONSTANTS.STATUS_TYPES.SUCCESS);
@@ -2642,6 +2735,7 @@ function loadFromLocalStorage() {
 
         if (grokApiKeyInput) grokApiKeyInput.value = grokApiKey;
         if (deepseekApiKeyInput) deepseekApiKeyInput.value = deepseekApiKey;
+        if (openrouterApiKeyInput) openrouterApiKeyInput.value = openrouterApiKey; // Populate OpenRouter input (if it's the global one)
 
         // Load project-scoped content
         if (translationBox) {
@@ -3528,7 +3622,7 @@ async function updateTokenCountAndCost() {
 
     if (countSource.startsWith('client-side estimate')) { // If server call failed/skipped, or resulted in fallback
         const words = text.split(/\s+/).filter(Boolean).length;
-        if (selectedModel.startsWith(CONSTANTS.MODELS.GROK_PREFIX) || selectedModel === CONSTANTS.MODELS.DEEPSEEK_CHAT) {
+        if (selectedModel.startsWith(CONSTANTS.MODELS.GROK_PREFIX) || selectedModel === CONSTANTS.MODELS.DEEPSEEK_CHAT || selectedModel.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
             tokenCount = Math.ceil(words * 1.35); // General heuristic for English-like text
             if (text.match(/[\u4E00-\u9FFF]/)) { // If CJK characters are present
                 tokenCount = Math.ceil(text.length * 0.8); // CJK often closer to 1 char = 1 token, but can be more complex
@@ -3630,3 +3724,88 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // ... rest of the function remains unchanged
 });
+
+// Function to load OpenRouter models dynamically
+async function loadOpenRouterModels() {
+    const openRouterOptGroup = document.querySelector('#model-select optgroup[label="OpenRouter"]');
+    if (!openRouterOptGroup) {
+        console.error('[OpenRouterModels] OpenRouter optgroup not found in model select.');
+        return;
+    }
+
+    openRouterOptGroup.innerHTML = ''; // Clear any existing dummy/error options
+
+    try {
+        console.log('[OpenRouterModels] Fetching models from OpenRouter API...');
+        updateStatus('Fetching OpenRouter models...', CONSTANTS.STATUS_TYPES.PROCESSING, 0);
+        const response = await fetch('https://openrouter.ai/api/v1/models');
+        
+        if (!response.ok) {
+            let errorText = `API Error: ${response.status}`;
+            try {
+                const errorDetails = await response.json(); // Try to get more details
+                errorText += ` - ${errorDetails.error?.message || response.statusText}`;
+            } catch (e) {
+                errorText += ` - ${response.statusText}`;
+            }
+            console.error(`[OpenRouterModels] ${errorText}`);
+            updateStatus(`Failed to load OpenRouter models: ${response.status}`, CONSTANTS.STATUS_TYPES.ERROR);
+            const errorOption = document.createElement('option');
+            errorOption.textContent = 'Failed to load models';
+            errorOption.disabled = true;
+            openRouterOptGroup.appendChild(errorOption);
+            return;
+        }
+
+        const { data } = await response.json();
+        if (!data || data.length === 0) {
+            console.warn('[OpenRouterModels] No models returned from OpenRouter API.');
+            updateStatus('No models found from OpenRouter.', CONSTANTS.STATUS_TYPES.INFO);
+            const noModelsOption = document.createElement('option');
+            noModelsOption.textContent = 'No models available';
+            noModelsOption.disabled = true;
+            openRouterOptGroup.appendChild(noModelsOption);
+            return;
+        }
+
+        console.log(`[OpenRouterModels] Received ${data.length} models from API.`);
+        openRouterModelData = {}; // Reset and populate with new data
+
+        // Sort models by name for better UX, handling cases where name might be missing
+        data.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+
+        data.forEach(model => {
+            // Use the model.id which is the full path OpenRouter expects
+            const optionValue = model.id; // e.g., "openai/gpt-3.5-turbo" or "anthropic/claude-3-haiku-20240307"
+            
+            const option = document.createElement('option');
+            option.value = optionValue;
+            option.textContent = model.name || model.id; // Display user-friendly name or ID if name is missing
+            openRouterOptGroup.appendChild(option);
+
+            // Store model details for pricing and context length
+            // OpenRouter provides pricing per million tokens
+            openRouterModelData[optionValue] = {
+                name: model.name || model.id,
+                pricing: {
+                    input: model.pricing?.input || '0', 
+                    output: model.pricing?.output || '0'
+                },
+                context_length: model.context_length || 0 
+            };
+        });
+
+        console.log('[OpenRouterModels] Successfully populated OpenRouter models in dropdown.');
+        updateStatus('OpenRouter models loaded.', CONSTANTS.STATUS_TYPES.SUCCESS, 3000);
+        // Don't call updatePricingDisplay() here directly, it will be called if the selection changes
+        // or if an OpenRouter model was already selected during loadFromLocalStorage.
+
+    } catch (error) {
+        console.error('[OpenRouterModels] Error fetching or processing OpenRouter models:', error);
+        updateStatus('Error loading OpenRouter models. Check console.', CONSTANTS.STATUS_TYPES.ERROR);
+        const errorOption = document.createElement('option');
+        errorOption.textContent = 'Error loading models';
+        errorOption.disabled = true;
+        openRouterOptGroup.appendChild(errorOption);
+    }
+}
