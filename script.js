@@ -1021,6 +1021,38 @@ let openRouterModelData = {}; // To store fetched OpenRouter model details
 // Add a global variable for the tokenizer server URL
 let tokenizerServerUrl = null; // Default to null, to be set by config
 
+// Function to route requests through a CORS proxy
+async function fetchWithCorsProxy(url, options = {}) {
+    // List of CORS proxies to try
+    const corsProxies = [
+        "https://corsproxy.io/?",
+        "https://cors-anywhere.herokuapp.com/",
+        "https://api.allorigins.win/raw?url="
+    ];
+    
+    console.log(`[CORSProxy] Attempting to fetch from ${url} using CORS proxy`);
+    
+    // Try each proxy in order until one works
+    for (const proxy of corsProxies) {
+        try {
+            const proxyUrl = `${proxy}${encodeURIComponent(url)}`;
+            console.log(`[CORSProxy] Trying proxy: ${proxy}`);
+            
+            const response = await fetch(proxyUrl, options);
+            if (response.ok) {
+                console.log(`[CORSProxy] Successfully used proxy: ${proxy}`);
+                return response;
+            }
+        } catch (error) {
+            console.warn(`[CORSProxy] Proxy ${proxy} failed:`, error);
+            // Continue to the next proxy
+        }
+    }
+    
+    // If all proxies fail, throw an error
+    throw new Error("All CORS proxies failed to fetch the resource");
+}
+
 // Debounce function
 function debounce(func, delay) {
     let timeout;
@@ -1648,31 +1680,47 @@ async function createTextChunks(text, modelName) {
 
     if (tokenizerServerUrl) { // Attempt to use server only if URL is configured
     try {
-        // Attempt to use the tokenizer server for chunking
-            console.log(`[Chunker] Attempting to use tokenizer server at ${tokenizerServerUrl} with max_tokens: ${maxTokens}`);
-        const healthResponse = await fetch(`${tokenizerServerUrl}/health`, { 
-            method: 'GET' 
-        }).catch(error => {
-                console.error('[Chunker] Error connecting to tokenizer server (during health check):', error);
-                throw new Error('Tokenizer server not reachable or health check fetch failed');
-        });
-
-        if (!healthResponse.ok) {
-                throw new Error(`Tokenizer server health check failed: ${healthResponse.status} ${await healthResponse.text()}`);
+        // Health check first - try direct, then with proxy if needed
+        console.log(`[Chunker] Attempting to use tokenizer server at ${tokenizerServerUrl} with max_tokens: ${maxTokens}`);
+        let healthResponse;
+        try {
+            healthResponse = await fetch(`${tokenizerServerUrl}/health`, { method: 'GET' });
+        } catch (directHealthError) {
+            console.warn('[Chunker] Direct health check failed, trying CORS proxy:', directHealthError);
+            healthResponse = await fetchWithCorsProxy(`${tokenizerServerUrl}/health`, { method: 'GET' });
         }
 
-        // If server is available, use it for chunking
+        if (!healthResponse.ok) {
+            throw new Error(`Tokenizer server health check failed: ${healthResponse.status} ${await healthResponse.text()}`);
+        }
+
+        // If server is available, use it for chunking - with proxy if needed
         console.log('[Chunker] Tokenizer server is available. Requesting chunking...');
-        const chunkResponse = await fetch(`${tokenizerServerUrl}/chunk`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                text: text,
-                max_tokens: maxTokens
-            })
-        });
+        let chunkResponse;
+        try {
+            chunkResponse = await fetch(`${tokenizerServerUrl}/chunk`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    text: text,
+                    max_tokens: maxTokens
+                })
+            });
+        } catch (directChunkError) {
+            console.warn('[Chunker] Direct chunk request failed, trying CORS proxy:', directChunkError);
+            chunkResponse = await fetchWithCorsProxy(`${tokenizerServerUrl}/chunk`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    text: text,
+                    max_tokens: maxTokens
+                })
+            });
+        }
 
         if (!chunkResponse.ok) {
             const errorData = await chunkResponse.json().catch(() => ({ error: 'Server returned non-OK status and failed to parse error JSON.' }));
@@ -3589,15 +3637,28 @@ async function updateTokenCountAndCost() {
         return;
     }
 
-    // TODO: Implement tokenizer server call here when server endpoint is ready
+    // Try to use the tokenizer server if available
     if (tokenizerServerUrl) {
         try {
+            const originalUrl = `${tokenizerServerUrl}/tokenize`;
             console.log(`[Tokenizer] Fetching token count from server for ${text.length} chars.`);
-            const response = await fetch(`${tokenizerServerUrl}/tokenize`, {
+            
+            // Use CORS proxy for the request to avoid CORS errors
+            const requestOptions = {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: text })
-            });
+            };
+            
+            // Try direct fetch first (might work if CORS is enabled on server)
+            let response;
+            try {
+                response = await fetch(originalUrl, requestOptions);
+            } catch (directFetchError) {
+                console.warn('[Tokenizer] Direct fetch failed, trying CORS proxy:', directFetchError);
+                response = await fetchWithCorsProxy(originalUrl, requestOptions);
+            }
+            
             if (response.ok) {
                 const data = await response.json();
                 if (data && typeof data.token_count === 'number') {
@@ -3605,17 +3666,14 @@ async function updateTokenCountAndCost() {
                     countSource = 'server';
                 } else {
                     console.warn('[Tokenizer] Server response missing token_count.');
-                    // Fallback to client-side if server response is malformed
                     countSource = 'client-side estimate (server error)'; 
                 }
             } else {
                 console.warn(`[Tokenizer] Server error: ${response.status}`);
-                 // Fallback to client-side if server returns an error
                 countSource = 'client-side estimate (server unavailable)';
             }
         } catch (error) {
             console.error('[Tokenizer] Error calling tokenizer server:', error);
-            // Fallback to client-side if fetch fails
             countSource = 'client-side estimate (fetch error)';
         }
     }
