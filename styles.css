@@ -608,18 +608,18 @@ button:active:not(:disabled) {
     background-color: var(--secondary) !important;
     color: white !important;
     border-color: var(--secondary-active) !important;
-}
+    }
 .placeholder-btn[data-placeholder="{glossary_terms}"]:hover {
     background-color: var(--secondary-hover) !important;
-}
-
+    }
+    
 /* Glossary area */
 .glossary-ai-controls {
     margin-bottom: var(--space-sm);
     display: flex;
     justify-content: flex-start;
-}
-
+    }
+    
 /* Glossary Replace Toggle Specific Styling */
 #glossary-replace-toggle-group {
     margin-bottom: var(--space-md); /* Add some space below the toggle */
@@ -880,7 +880,7 @@ footer.status-area .card.controls-card {
     to {
         opacity: 1;
         transform: translateY(0);
-    }
+}
 }
 
 /* Tooltip */
@@ -934,7 +934,7 @@ footer.status-area .card.controls-card {
     body {
         padding: var(--space-sm) !important;
         font-size: 13px;
-    }
+}
     .input-output-container {
         grid-template-columns: 1fr !important;
         gap: var(--space-sm) !important;
@@ -943,7 +943,7 @@ footer.status-area .card.controls-card {
         grid-column: 1 / -1;
         margin-top: var(--space-sm);
         margin-bottom: var(--space-sm);
-    }
+}
     .settings-grid {
         grid-template-columns: 1fr !important;
         gap: var(--space-sm);
@@ -1083,7 +1083,7 @@ footer.status-area .card.controls-card {
     }
     70% {
         box-shadow: 0 0 0 6px rgba(91, 138, 249, 0);
-    }
+}
     100% {
         box-shadow: 0 0 0 0 rgba(91, 138, 249, 0);
     }
@@ -1187,7 +1187,7 @@ footer.status-area .card.controls-card {
 
 .current-project:hover {
     background-color: var(--bg-dark);
-}
+    }
 
 #active-project-name {
     font-weight: 500;
@@ -1234,8 +1234,8 @@ footer.status-area .card.controls-card {
     
     .app-wrapper {
         flex-direction: column;
-    }
-    
+}
+
     .project-sidebar {
         position: fixed;
         left: 0;
@@ -1245,15 +1245,15 @@ footer.status-area .card.controls-card {
         z-index: 1000;
         transform: translateX(-100%);
         transition: transform 0.3s ease;
-    }
-    
+}
+
     .project-sidebar.show {
         transform: translateX(0);
     }
     
     .sidebar-toggle-mobile {
         display: block;
-    }
+}
 
     .app-container {
         margin-left: 0;

@@ -109,7 +109,7 @@ const CONSTANTS = {
     MODELS: {
         GROK_PREFIX: 'grok-',
         DEEPSEEK_CHAT: 'deepseek-chat',
-        OPENROUTER_PREFIX: 'openrouter/', // New prefix for OpenRouter models
+        // OPENROUTER_PREFIX: 'openrouter/', // This was causing issues, removing
         DEFAULT_MAX_OUTPUT_TOKENS_GROK: 131072, // Reverted to original value
         DEFAULT_MAX_OUTPUT_TOKENS_DEEPSEEK: 8000,   // Added
         DEFAULT_MAX_OUTPUT_TOKENS_OPENROUTER: 8000 // Default for OpenRouter, adjust as needed
@@ -1172,11 +1172,6 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
 
 
         console.info('[DOMReady] Phase 6: Attaching event listeners...');
-        
-        // Set up component-specific event listeners that were moved from separate listeners
-        setupPlaceholderButtons();
-        setupGlossaryButtonEvents();
-        
         // Add event listeners for buttons with null checks
         if (translateBtn) translateBtn.addEventListener('click', handleTranslation);
         if (clearBtn) clearBtn.addEventListener('click', clearContextualFields); // Renamed function call
@@ -1317,8 +1312,8 @@ function insertTextAtCursor(textarea, textToInsert) {
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// Event listeners for placeholder buttons - Will be called from main DOMContentLoaded
-const setupPlaceholderButtons = () => {
+// Event listeners for placeholder buttons
+document.addEventListener('DOMContentLoaded', () => {
     const placeholderButtonsContainer = document.getElementById('prompt-placeholder-buttons');
     if (placeholderButtonsContainer) {
         const placeholderButtons = placeholderButtonsContainer.querySelectorAll('.placeholder-btn');
@@ -1330,8 +1325,14 @@ const setupPlaceholderButtons = () => {
                 }
             });
         });
+        // Remove the following lines that dynamically add a glossary button
+        // const glossaryPlaceholderBtn = document.createElement('button');
+        // glossaryPlaceholderBtn.className = 'placeholder-btn';
+        // glossaryPlaceholderBtn.dataset.placeholder = '{glossary_terms}';
+        // glossaryPlaceholderBtn.textContent = 'Glossary Terms';
+        // placeholderButtonsContainer.appendChild(glossaryPlaceholderBtn);
     }
-};
+});
 
 // ... other event listeners ...
 
@@ -1440,8 +1441,8 @@ function checkApiKey() {
             apiKeyMissing = true;
             specificMessage = 'DeepSeek API key is not set. Configure in settings if using DeepSeek.';
         }
-    // Check OpenRouter models
-    } else if (selectedModel.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
+    // Check OpenRouter models by seeing if the selected model ID is a key in our loaded OpenRouter data
+    } else if (openRouterModelData.hasOwnProperty(selectedModel)) { 
         if (!openrouterApiKey || openrouterApiKey === CONSTANTS.API_KEY_PLACEHOLDERS.OPENROUTER) {
             apiKeyMissing = true;
             specificMessage = 'OpenRouter API key is not set. Configure in settings if using OpenRouter models.';
@@ -1517,8 +1518,7 @@ function updatePricingDisplay() {
     if (modelPricing[selectedModel]) { // For Grok and DeepSeek (hardcoded ones)
         const price = modelPricing[selectedModel];
         pricingDisplay.innerHTML = `Input: ${price.input}/1M tokens, Completion: ${price.completion}/1M tokens, Context: ${price.context}`;
-    } else if (selectedModel.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX) && openRouterModelData[selectedModel]) {
-        // For dynamically loaded OpenRouter models
+    } else if (openRouterModelData.hasOwnProperty(selectedModel)) { // For dynamically loaded OpenRouter models
         const modelData = openRouterModelData[selectedModel];
         const inputCost = modelData.pricing?.input ? `$${parseFloat(modelData.pricing.input).toFixed(2)}` : 'N/A';
         const outputCost = modelData.pricing?.output ? `$${parseFloat(modelData.pricing.output).toFixed(2)}` : 'N/A';
@@ -1534,9 +1534,6 @@ function updatePricingDisplay() {
             }
         }
         pricingDisplay.innerHTML = `Input: ${inputCost}/1M, Output: ${outputCost}/1M, Context: ${contextWindow}`;
-    } else if (selectedModel.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
-        // This case handles when an OpenRouter model is selected but its data hasn't loaded yet or is missing
-        pricingDisplay.innerHTML = 'OpenRouter model: pricing/context info loading or unavailable.';
     } else {
         pricingDisplay.innerHTML = 'Pricing info not available for this model.';
     }
@@ -1635,7 +1632,7 @@ async function createTextChunks(text, modelName) {
     } else if (modelName === CONSTANTS.MODELS.DEEPSEEK_CHAT) {
         maxTokens = CONSTANTS.CHUNKING.DEFAULT_DEEPSEEK_TARGET_TOKENS;
         console.log(`[Chunker] Using DeepSeek model, setting max tokens for chunking to ${maxTokens}`);
-    } else if (modelName.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
+    } else if (openRouterModelData.hasOwnProperty(modelName)) { // Check if it's a known OpenRouter model
         maxTokens = CONSTANTS.CHUNKING.DEFAULT_OPENROUTER_TARGET_TOKENS;
         console.log(`[Chunker] Using OpenRouter model (${modelName}), setting max tokens for chunking to ${maxTokens}`);
     } else {
@@ -2227,11 +2224,11 @@ function getApiConfig(model, prompt, temperature, stream) {
             stream: stream,
             max_tokens: CONSTANTS.MODELS.DEFAULT_MAX_OUTPUT_TOKENS_DEEPSEEK 
         };
-    } else if (model.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
+    } else if (openRouterModelData.hasOwnProperty(model)) { // Check if it's a known OpenRouter model
         apiUrl = 'https://openrouter.ai/api/v1/chat/completions';
         apiKey = openrouterApiKey;
         requestBody = {
-            model: model.substring(CONSTANTS.MODELS.OPENROUTER_PREFIX.length), // e.g., "anthropic/claude-3-haiku-20240307"
+            model: model, // Use the model ID directly as it is from the dropdown
             messages: [{ role: "user", content: prompt }],
             temperature: temperature,
             stream: stream,
@@ -2331,11 +2328,11 @@ async function getTranslation(prompt, model, temperature, stream = false, update
     if (!apiKey || 
         (model.startsWith(CONSTANTS.MODELS.GROK_PREFIX) && apiKey === CONSTANTS.API_KEY_PLACEHOLDERS.GROK) || 
         (model === CONSTANTS.MODELS.DEEPSEEK_CHAT && apiKey === CONSTANTS.API_KEY_PLACEHOLDERS.DEEPSEEK) ||
-        (model.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX) && apiKey === CONSTANTS.API_KEY_PLACEHOLDERS.OPENROUTER)) {
+        (openRouterModelData.hasOwnProperty(model) && apiKey === CONSTANTS.API_KEY_PLACEHOLDERS.OPENROUTER)) { // Check OpenRouter key if it's an OpenRouter model
         let specificKeyError = "API key not set.";
         if (model.startsWith(CONSTANTS.MODELS.GROK_PREFIX)) specificKeyError = "Grok API key not set.";
         else if (model === CONSTANTS.MODELS.DEEPSEEK_CHAT) specificKeyError = "DeepSeek API key not set.";
-        else if (model.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) specificKeyError = "OpenRouter API key not set.";
+        else if (openRouterModelData.hasOwnProperty(model)) specificKeyError = "OpenRouter API key not set.";
         throw new Error(`API key is not set properly. ${specificKeyError} Please check the API key configuration.`);
     }
 
@@ -2344,8 +2341,8 @@ async function getTranslation(prompt, model, temperature, stream = false, update
         'Content-Type': 'application/json'
     };
 
-    // Add OpenRouter specific headers if applicable
-    if (model.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
+    // Add OpenRouter specific headers if applicable (This check is now also correct)
+    if (openRouterModelData.hasOwnProperty(model)) {
         // headers['HTTP-Referer'] = 'YOUR_SITE_URL'; // Replace with your actual site URL or a variable
         // headers['X-Title'] = 'Fanfic Translator'; // Replace with your app name or a variable
     }
@@ -3359,8 +3356,9 @@ function handleEditGlossaryTerm(categoryName, originalSourceTerm, newSourceTerm,
     console.log(`[GlossaryEdit] Term in "${categoryName}\": "${originalSourceTerm}\" updated to "${newSourceTerm} : ${newTargetTranslation}".`);
 }
 
-// Setup function for glossary button event listener
-const setupGlossaryButtonEvents = () => {
+// Update the event listener for delete to pass category
+document.addEventListener('DOMContentLoaded', () => {
+    // ... (other DOMContentLoaded listeners)
     if (glossaryDisplayArea) {
         glossaryDisplayArea.addEventListener('click', (event) => {
             const targetButton = event.target.closest('.delete-glossary-term-btn');
@@ -3375,7 +3373,8 @@ const setupGlossaryButtonEvents = () => {
             }
         });
     }
-};
+    // ...
+});
 
 // --- AI Glossary Generation Function ---
 async function handleAIGlossaryGeneration() {
@@ -3619,7 +3618,9 @@ async function updateTokenCountAndCost() {
 
     if (countSource.startsWith('client-side estimate')) { // If server call failed/skipped, or resulted in fallback
         const words = text.split(/\s+/).filter(Boolean).length;
-        if (selectedModel.startsWith(CONSTANTS.MODELS.GROK_PREFIX) || selectedModel === CONSTANTS.MODELS.DEEPSEEK_CHAT || selectedModel.startsWith(CONSTANTS.MODELS.OPENROUTER_PREFIX)) {
+        if (selectedModel.startsWith(CONSTANTS.MODELS.GROK_PREFIX) || 
+            selectedModel === CONSTANTS.MODELS.DEEPSEEK_CHAT || 
+            openRouterModelData.hasOwnProperty(selectedModel)) { // Check OpenRouter models here too
             tokenCount = Math.ceil(words * 1.35); // General heuristic for English-like text
             if (text.match(/[\u4E00-\u9FFF]/)) { // If CJK characters are present
                 tokenCount = Math.ceil(text.length * 0.8); // CJK often closer to 1 char = 1 token, but can be more complex
@@ -3711,17 +3712,16 @@ function handleReplaceInInput(forceReplace = false) {
 }
 
 // Main initialization when DOM is loaded
-// REMOVED: Duplicate initialization that was causing double loading
-// document.addEventListener('DOMContentLoaded', () => {
-//     console.log('Document loaded. Initializing application...');
-//     
-//     // Initialize ProjectManager first
-//     ProjectManager.init();
-//     
-//     loadFromLocalStorage();
-//     
-//     // ... rest of the function remains unchanged
-// });
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('Document loaded. Initializing application...');
+    
+    // Initialize ProjectManager first
+    ProjectManager.init();
+    
+    loadFromLocalStorage();
+    
+    // ... rest of the function remains unchanged
+});
 
 // Function to load OpenRouter models dynamically
 async function loadOpenRouterModels() {
