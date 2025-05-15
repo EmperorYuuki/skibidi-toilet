@@ -1021,38 +1021,6 @@ let openRouterModelData = {}; // To store fetched OpenRouter model details
 // Add a global variable for the tokenizer server URL
 let tokenizerServerUrl = null; // Default to null, to be set by config
 
-// Function to route requests through a CORS proxy
-async function fetchWithCorsProxy(url, options = {}) {
-    // List of CORS proxies to try
-    const corsProxies = [
-        "https://corsproxy.io/?",
-        "https://cors-anywhere.herokuapp.com/",
-        "https://api.allorigins.win/raw?url="
-    ];
-    
-    console.log(`[CORSProxy] Attempting to fetch from ${url} using CORS proxy`);
-    
-    // Try each proxy in order until one works
-    for (const proxy of corsProxies) {
-        try {
-            const proxyUrl = `${proxy}${encodeURIComponent(url)}`;
-            console.log(`[CORSProxy] Trying proxy: ${proxy}`);
-            
-            const response = await fetch(proxyUrl, options);
-            if (response.ok) {
-                console.log(`[CORSProxy] Successfully used proxy: ${proxy}`);
-                return response;
-            }
-        } catch (error) {
-            console.warn(`[CORSProxy] Proxy ${proxy} failed:`, error);
-            // Continue to the next proxy
-        }
-    }
-    
-    // If all proxies fail, throw an error
-    throw new Error("All CORS proxies failed to fetch the resource");
-}
-
 // Debounce function
 function debounce(func, delay) {
     let timeout;
@@ -1204,6 +1172,11 @@ document.addEventListener('DOMContentLoaded', async () => { // Make DOMContentLo
 
 
         console.info('[DOMReady] Phase 6: Attaching event listeners...');
+        
+        // Set up component-specific event listeners that were moved from separate listeners
+        setupPlaceholderButtons();
+        setupGlossaryButtonEvents();
+        
         // Add event listeners for buttons with null checks
         if (translateBtn) translateBtn.addEventListener('click', handleTranslation);
         if (clearBtn) clearBtn.addEventListener('click', clearContextualFields); // Renamed function call
@@ -1344,8 +1317,8 @@ function insertTextAtCursor(textarea, textToInsert) {
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// Event listeners for placeholder buttons
-document.addEventListener('DOMContentLoaded', () => {
+// Event listeners for placeholder buttons - Will be called from main DOMContentLoaded
+const setupPlaceholderButtons = () => {
     const placeholderButtonsContainer = document.getElementById('prompt-placeholder-buttons');
     if (placeholderButtonsContainer) {
         const placeholderButtons = placeholderButtonsContainer.querySelectorAll('.placeholder-btn');
@@ -1357,14 +1330,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
-        // Remove the following lines that dynamically add a glossary button
-        // const glossaryPlaceholderBtn = document.createElement('button');
-        // glossaryPlaceholderBtn.className = 'placeholder-btn';
-        // glossaryPlaceholderBtn.dataset.placeholder = '{glossary_terms}';
-        // glossaryPlaceholderBtn.textContent = 'Glossary Terms';
-        // placeholderButtonsContainer.appendChild(glossaryPlaceholderBtn);
     }
-});
+};
 
 // ... other event listeners ...
 
@@ -1680,47 +1647,31 @@ async function createTextChunks(text, modelName) {
 
     if (tokenizerServerUrl) { // Attempt to use server only if URL is configured
     try {
-        // Health check first - try direct, then with proxy if needed
-        console.log(`[Chunker] Attempting to use tokenizer server at ${tokenizerServerUrl} with max_tokens: ${maxTokens}`);
-        let healthResponse;
-        try {
-            healthResponse = await fetch(`${tokenizerServerUrl}/health`, { method: 'GET' });
-        } catch (directHealthError) {
-            console.warn('[Chunker] Direct health check failed, trying CORS proxy:', directHealthError);
-            healthResponse = await fetchWithCorsProxy(`${tokenizerServerUrl}/health`, { method: 'GET' });
-        }
+        // Attempt to use the tokenizer server for chunking
+            console.log(`[Chunker] Attempting to use tokenizer server at ${tokenizerServerUrl} with max_tokens: ${maxTokens}`);
+        const healthResponse = await fetch(`${tokenizerServerUrl}/health`, { 
+            method: 'GET' 
+        }).catch(error => {
+                console.error('[Chunker] Error connecting to tokenizer server (during health check):', error);
+                throw new Error('Tokenizer server not reachable or health check fetch failed');
+        });
 
         if (!healthResponse.ok) {
-            throw new Error(`Tokenizer server health check failed: ${healthResponse.status} ${await healthResponse.text()}`);
+                throw new Error(`Tokenizer server health check failed: ${healthResponse.status} ${await healthResponse.text()}`);
         }
 
-        // If server is available, use it for chunking - with proxy if needed
+        // If server is available, use it for chunking
         console.log('[Chunker] Tokenizer server is available. Requesting chunking...');
-        let chunkResponse;
-        try {
-            chunkResponse = await fetch(`${tokenizerServerUrl}/chunk`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    text: text,
-                    max_tokens: maxTokens
-                })
-            });
-        } catch (directChunkError) {
-            console.warn('[Chunker] Direct chunk request failed, trying CORS proxy:', directChunkError);
-            chunkResponse = await fetchWithCorsProxy(`${tokenizerServerUrl}/chunk`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    text: text,
-                    max_tokens: maxTokens
-                })
-            });
-        }
+        const chunkResponse = await fetch(`${tokenizerServerUrl}/chunk`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                text: text,
+                max_tokens: maxTokens
+            })
+        });
 
         if (!chunkResponse.ok) {
             const errorData = await chunkResponse.json().catch(() => ({ error: 'Server returned non-OK status and failed to parse error JSON.' }));
@@ -3408,9 +3359,8 @@ function handleEditGlossaryTerm(categoryName, originalSourceTerm, newSourceTerm,
     console.log(`[GlossaryEdit] Term in "${categoryName}\": "${originalSourceTerm}\" updated to "${newSourceTerm} : ${newTargetTranslation}".`);
 }
 
-// Update the event listener for delete to pass category
-document.addEventListener('DOMContentLoaded', () => {
-    // ... (other DOMContentLoaded listeners)
+// Setup function for glossary button event listener
+const setupGlossaryButtonEvents = () => {
     if (glossaryDisplayArea) {
         glossaryDisplayArea.addEventListener('click', (event) => {
             const targetButton = event.target.closest('.delete-glossary-term-btn');
@@ -3425,8 +3375,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    // ...
-});
+};
 
 // --- AI Glossary Generation Function ---
 async function handleAIGlossaryGeneration() {
@@ -3637,28 +3586,15 @@ async function updateTokenCountAndCost() {
         return;
     }
 
-    // Try to use the tokenizer server if available
+    // TODO: Implement tokenizer server call here when server endpoint is ready
     if (tokenizerServerUrl) {
         try {
-            const originalUrl = `${tokenizerServerUrl}/tokenize`;
             console.log(`[Tokenizer] Fetching token count from server for ${text.length} chars.`);
-            
-            // Use CORS proxy for the request to avoid CORS errors
-            const requestOptions = {
+            const response = await fetch(`${tokenizerServerUrl}/tokenize`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: text })
-            };
-            
-            // Try direct fetch first (might work if CORS is enabled on server)
-            let response;
-            try {
-                response = await fetch(originalUrl, requestOptions);
-            } catch (directFetchError) {
-                console.warn('[Tokenizer] Direct fetch failed, trying CORS proxy:', directFetchError);
-                response = await fetchWithCorsProxy(originalUrl, requestOptions);
-            }
-            
+            });
             if (response.ok) {
                 const data = await response.json();
                 if (data && typeof data.token_count === 'number') {
@@ -3666,14 +3602,17 @@ async function updateTokenCountAndCost() {
                     countSource = 'server';
                 } else {
                     console.warn('[Tokenizer] Server response missing token_count.');
+                    // Fallback to client-side if server response is malformed
                     countSource = 'client-side estimate (server error)'; 
                 }
             } else {
                 console.warn(`[Tokenizer] Server error: ${response.status}`);
+                 // Fallback to client-side if server returns an error
                 countSource = 'client-side estimate (server unavailable)';
             }
         } catch (error) {
             console.error('[Tokenizer] Error calling tokenizer server:', error);
+            // Fallback to client-side if fetch fails
             countSource = 'client-side estimate (fetch error)';
         }
     }
@@ -3772,16 +3711,17 @@ function handleReplaceInInput(forceReplace = false) {
 }
 
 // Main initialization when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('Document loaded. Initializing application...');
-    
-    // Initialize ProjectManager first
-    ProjectManager.init();
-    
-    loadFromLocalStorage();
-    
-    // ... rest of the function remains unchanged
-});
+// REMOVED: Duplicate initialization that was causing double loading
+// document.addEventListener('DOMContentLoaded', () => {
+//     console.log('Document loaded. Initializing application...');
+//     
+//     // Initialize ProjectManager first
+//     ProjectManager.init();
+//     
+//     loadFromLocalStorage();
+//     
+//     // ... rest of the function remains unchanged
+// });
 
 // Function to load OpenRouter models dynamically
 async function loadOpenRouterModels() {
